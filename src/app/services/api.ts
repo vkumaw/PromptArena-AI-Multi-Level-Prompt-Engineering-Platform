@@ -118,37 +118,33 @@ const mockApi: ApiClient = {
       timestamp: entry.timestamp,
     }));
     const attempts = Math.max(evolutionHistory.length, 1);
-    const efficiencyIndex =
-      reliabilityScore >= 80 ? Math.round(100 / attempts) : null;
+    const efficiencyIndex = Math.round(reliabilityScore / attempts);
     const firstPrompt = evolved[0]?.prompt || payload.promptText;
     const firstScore = evolved[0]?.score || structureScore;
     const improvementPercent =
       payload.previousVersions.length >= 1
         ? Math.round(reliabilityScore - clamp(30 + firstScore * 5, 0, 100))
         : null;
-    const generated = generateFeedback(firstPrompt, payload.promptText);
 
-    const feedback: string[] = [];
-    feedback.push(...generated);
-    if (structureScore < 5) feedback.push('Add clear language and output format requirements.');
-    if (!/edge case|constraint|negative|limit/i.test(payload.promptText)) {
-      feedback.push('Mention edge cases and constraints explicitly.');
-    }
-    if (!/return|output|json|true|false/i.test(payload.promptText)) {
-      feedback.push('Define expected output shape to reduce ambiguity.');
-    }
-    if (payload.problemContext?.expected_output) {
-      feedback.push(
-        `Align the response format with expected output: ${payload.problemContext.expected_output}.`
-      );
-    }
-    if (payload.problemContext?.tags?.length) {
-      feedback.push(
-        `Include constraints relevant to: ${payload.problemContext.tags.join(', ')}.`
-      );
-    }
-    if (feedback.length === 0) {
-      feedback.push('Prompt quality is strong. Consider adding performance constraints.');
+    const prevText =
+      payload.previousVersions.length > 0
+        ? payload.previousVersions[payload.previousVersions.length - 1]
+            .promptText
+        : '';
+    let feedback: string[];
+    if (prevText && prevText !== payload.promptText) {
+      const deltas = generateFeedback(prevText, payload.promptText);
+      feedback = ['Improvement detected:', ...deltas];
+      if (feedback.length === 1) {
+        feedback.push(
+          '+ Refine further: align wording with tests, return values, and edge cases.'
+        );
+      }
+    } else {
+      feedback = [
+        'Prompt analysis (baseline):',
+        '• Continue: add language, function signature, I/O, and edge cases on your next attempt.',
+      ];
     }
 
     const contextText = `${payload.problemContext?.title || ''} ${payload.problemContext?.description || ''} ${(payload.problemContext?.tags || []).join(' ')}`.toLowerCase();

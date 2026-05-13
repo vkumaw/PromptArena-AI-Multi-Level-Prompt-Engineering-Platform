@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navbar } from '../components/Navbar';
-import { RefreshCw, Sparkles, ArrowRight } from 'lucide-react';
+import { RefreshCw, Sparkles } from 'lucide-react';
 import { authService } from '../utils/auth';
 import type {
   CodingProblem,
@@ -32,6 +32,7 @@ interface Level2HistoryApiResponse {
   evolutionHistory: Level2EvolutionEntry[];
   comparison: PromptComparison | null;
   efficiencyIndex: number | null;
+  feedback?: string[];
   latest: {
     reliabilityScore: number;
     promptScore?: number;
@@ -60,49 +61,13 @@ function mapHistoryToPersistedView(
     efficiencyIndex: data.efficiencyIndex,
     attempts: data.attempts,
     newVersion: latest.newVersion,
-    feedback: [],
+    feedback: data.feedback ?? [],
   };
 }
-
-interface PromptSuggestion {
-  title: string;
-  description: string;
-  before: string;
-  after: string;
-  improvement: string;
-}
-
-const suggestions: PromptSuggestion[] = [
-  {
-    title: 'Add Context',
-    description: 'Provide background information to improve accuracy',
-    before: 'Write a product description.',
-    after:
-      'Write a compelling product description for a premium noise-cancelling headphone targeted at remote workers. Highlight comfort, battery life, and audio quality. Keep it under 100 words.',
-    improvement: '+35% accuracy',
-  },
-  {
-    title: 'Specify Format',
-    description: 'Define the exact output format you need',
-    before: 'Explain how photosynthesis works.',
-    after:
-      'Explain how photosynthesis works using: 1) A one-sentence summary, 2) Three key steps in bullet points, 3) One real-world application. Write for a 10-year-old audience.',
-    improvement: '+42% clarity',
-  },
-  {
-    title: 'Add Constraints',
-    description: 'Set boundaries to guide the AI response',
-    before: 'Generate creative names for my app.',
-    after:
-      'Generate 5 creative names for a fitness tracking app. Requirements: 1) Easy to pronounce, 2) Available as .com domain, 3) Under 10 letters, 4) Conveys energy and motivation. Avoid generic terms like "fit" or "track".',
-    improvement: '+48% relevance',
-  },
-];
 
 export function Level2Page() {
   const [problems, setProblems] = useState<CodingProblem[]>([]);
   const [selectedProblemId, setSelectedProblemId] = useState('');
-  const [selectedSuggestion, setSelectedSuggestion] = useState(suggestions[0]);
   const [customPrompt, setCustomPrompt] = useState('');
   const [result, setResult] = useState<Level2Response | null>(null);
   const [persistedView, setPersistedView] = useState<Level2Response | null>(
@@ -242,9 +207,7 @@ export function Level2Page() {
   };
 
   const attempts = view?.attempts ?? currentAttempts;
-  const showEfficiencyPanel =
-    view &&
-    (view.reliabilityScore >= 80 || (view.attempts ?? currentAttempts) >= 3);
+  const showEfficiencyPanel = Boolean(view && attempts >= 1);
   const showComparisonPanel =
     view?.comparison &&
     (view.reliabilityScore === 100 || (view.attempts ?? currentAttempts) >= 3);
@@ -318,84 +281,6 @@ export function Level2Page() {
               {selectedProblem.description}
             </p>
           )}
-        </div>
-
-        {/* Improvement Techniques */}
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">
-            Optimization Techniques
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {suggestions.map((suggestion, index) => (
-              <button
-                key={index}
-                onClick={() => setSelectedSuggestion(suggestion)}
-                className={`text-left p-5 rounded-xl border-2 text-card-foreground transition-all ${
-                  selectedSuggestion.title === suggestion.title
-                    ? 'border-violet-500 bg-violet-500/5'
-                    : 'border-border bg-card hover:border-violet-500/50'
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="size-5 text-violet-500" />
-                  <h3 className="font-semibold">{suggestion.title}</h3>
-                </div>
-                <p className="text-sm text-muted-foreground mb-3">
-                  {suggestion.description}
-                </p>
-                <div className="inline-flex items-center gap-1 text-xs font-medium text-green-500 bg-green-500/10 px-2 py-1 rounded">
-                  {suggestion.improvement}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Static Educational Sample */}
-        <div className="bg-card border border-border rounded-xl p-6 mb-8 text-card-foreground">
-          <div className="flex items-center justify-between mb-6 gap-2">
-            <h2 className="text-xl font-semibold">Sample Technique Example</h2>
-            <span className="text-xs bg-amber-500/15 text-amber-500 border border-amber-500/30 rounded px-2 py-1">
-              Static sample - not your selected problem output
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Before */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="size-6 bg-red-500/20 text-red-500 rounded flex items-center justify-center text-xs font-bold">
-                  ✕
-                </div>
-                <span className="font-semibold text-red-500">
-                  Original Prompt
-                </span>
-              </div>
-              <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-4 font-mono text-sm">
-                {selectedSuggestion.before}
-              </div>
-            </div>
-
-            {/* Arrow */}
-            <div className="hidden lg:flex items-center justify-center absolute left-1/2 -translate-x-1/2">
-              <ArrowRight className="size-8 text-violet-500" />
-            </div>
-
-            {/* After */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="size-6 bg-green-500/20 text-green-500 rounded flex items-center justify-center text-xs font-bold">
-                  ✓
-                </div>
-                <span className="font-semibold text-green-500">
-                  Optimized Prompt
-                </span>
-              </div>
-              <div className="bg-green-500/5 border border-green-500/20 rounded-lg p-4 font-mono text-sm">
-                {selectedSuggestion.after}
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Try It Yourself */}
@@ -510,13 +395,49 @@ export function Level2Page() {
                         </div>
                       )}
                     {showEfficiencyPanel && (
-                      <div className="bg-accent/50 border border-border rounded-lg p-3 sm:col-span-2">
-                        Efficiency Index:{' '}
-                        <span className="font-semibold">
-                          {view.efficiencyIndex != null
-                            ? `${view.efficiencyIndex}%`
-                            : '—'}
-                        </span>
+                      <div className="bg-accent/50 border border-border rounded-lg p-4 sm:col-span-2 space-y-2 text-sm">
+                        <p className="font-semibold text-foreground">
+                          Efficiency Index
+                        </p>
+                        <p className="text-muted-foreground">
+                          Formula: Efficiency = Accuracy / Attempts (Accuracy is
+                          your reliability score, 0–100).
+                        </p>
+                        <ul className="text-muted-foreground space-y-1 list-none pl-0">
+                          <li>
+                            Accuracy:{' '}
+                            <span className="font-semibold text-foreground">
+                              {view.reliabilityScore ?? 0}
+                            </span>
+                          </li>
+                          <li>
+                            Attempts:{' '}
+                            <span className="font-semibold text-foreground">
+                              {attempts}
+                            </span>
+                          </li>
+                          <li>
+                            Efficiency:{' '}
+                            <span className="font-semibold text-foreground">
+                              {view.efficiencyIndex != null
+                                ? `${view.efficiencyIndex}%`
+                                : '—'}
+                            </span>
+                            {view.efficiencyIndex != null &&
+                              view.reliabilityScore != null && (
+                                <span className="text-muted-foreground">
+                                  {' '}
+                                  ({view.reliabilityScore} / {attempts} ={' '}
+                                  {view.efficiencyIndex}%)
+                                </span>
+                              )}
+                          </li>
+                        </ul>
+                        <p className="text-xs text-muted-foreground">
+                          Higher efficiency means you reached a given accuracy
+                          with fewer attempts (better prompt engineering
+                          discipline).
+                        </p>
                       </div>
                     )}
                   </div>
@@ -538,7 +459,13 @@ export function Level2Page() {
 
                   {view.feedback && view.feedback.length > 0 && (
                     <div className="bg-card border border-border rounded-lg p-4">
-                      <p className="font-semibold mb-2">Improvement Feedback</p>
+                      <p className="font-semibold mb-2">
+                        Prompt Improvement Feedback Engine
+                      </p>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        System analyzes your prompt versus prior attempts and
+                        outcomes.
+                      </p>
                       <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                         {view.feedback.map((item, index) => (
                           <li key={index}>{item}</li>

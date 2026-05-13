@@ -92,6 +92,7 @@ export interface Level2Response {
   testCaseResults?: TestCaseResult[];
   problemRelevanceScore?: number;
   relevanceNotes?: string[];
+  /** Prompt improvement / baseline lines from the Level 2 feedback engine. */
   feedback: string[];
   comparison: PromptComparison | null;
   aiOutput?: string;

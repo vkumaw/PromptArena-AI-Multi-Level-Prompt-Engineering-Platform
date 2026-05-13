@@ -1,7 +1,15 @@
 import { evaluatePrompt } from "../utils/evaluate.js";
 import { stripMarkdownCode } from "../services/testRunner.js";
-import { buildSmartFeedbackGaps } from "../utils/promptQuality.js";
+import { buildLevel2ImprovementFeedback } from "../utils/level2ImprovementFeedback.js";
 import UserData from "../models/userData.js";
+
+function testPassPercent(record) {
+  if (!record || !record.totalTestCases || record.totalTestCases <= 0)
+    return undefined;
+  return Math.round(
+    ((record.testCasesPassed ?? 0) / record.totalTestCases) * 100
+  );
+}
 
 /** GET saved attempts for read-only review (e.g. after 3/3 attempts or on revisit). */
 export const getLevel2History = async (req, res) => {
@@ -33,6 +41,7 @@ export const getLevel2History = async (req, res) => {
       timestamp: a.timestamp
         ? new Date(a.timestamp).toISOString()
         : new Date().toISOString(),
+      feedback: Array.isArray(a.feedback) ? a.feedback : [],
     }));
 
     const evolutionHistory = records.map((r) => ({
@@ -67,9 +76,30 @@ export const getLevel2History = async (req, res) => {
 
     const lastRel = last?.reliabilityScore ?? 0;
     const efficiencyIndex =
-      attempts > 0 && lastRel >= 80
-        ? Math.round(100 / attempts)
-        : null;
+      attempts > 0 ? Math.round(lastRel / attempts) : null;
+
+    let feedback = [];
+    if (last) {
+      const stored = last.feedback;
+      if (Array.isArray(stored) && stored.length > 0) {
+        feedback = stored;
+      } else if (records.length >= 1) {
+        const lastRec = records[records.length - 1];
+        const prevRec =
+          records.length >= 2 ? records[records.length - 2] : null;
+        feedback = buildLevel2ImprovementFeedback({
+          currentPrompt: lastRec.prompt,
+          previousPrompt: prevRec?.prompt ?? null,
+          problem: null,
+          metrics: {
+            prevReliability: prevRec?.reliabilityScore,
+            currentReliability: lastRec.reliabilityScore,
+            prevTestPass: testPassPercent(prevRec),
+            currentTestPass: testPassPercent(lastRec),
+          },
+        });
+      }
+    }
 
     res.json({
       attempts,
@@ -77,6 +107,7 @@ export const getLevel2History = async (req, res) => {
       evolutionHistory,
       comparison,
       efficiencyIndex,
+      feedback,
       latest: last
         ? {
             reliabilityScore: last.reliabilityScore,
@@ -179,9 +210,7 @@ export const handleLevel2 = async (req, res) => {
     const attempts = previousAttempts.length + 1;
 
     const efficiencyIndex =
-      result.reliabilityScore >= 80
-        ? Math.round(100 / attempts)
-        : null;
+      attempts > 0 ? Math.round(result.reliabilityScore / attempts) : null;
 
     const evolutionHistory = previousAttempts.map((a, index) => ({
       version: index + 1,
@@ -201,25 +230,26 @@ export const handleLevel2 = async (req, res) => {
       timestamp: new Date().toISOString(),
     });
 
-    const smartFeedback = buildSmartFeedbackGaps(prompt, problem);
-    const evolutionHints = [];
-    if (previousAttempts.length >= 1) {
-      const prev = previousAttempts[previousAttempts.length - 1].prompt;
+    const prevDoc =
+      previousAttempts.length > 0
+        ? previousAttempts[previousAttempts.length - 1]
+        : null;
+    const prevPrompt = prevDoc?.prompt ?? null;
 
-      if (prompt.length > prev.length) {
-        evolutionHints.push("Improved prompt detail");
-      }
-
-      if (prompt.includes("function") || prompt.includes("def")) {
-        evolutionHints.push("Defined function clearly");
-      }
-
-      if (prompt.includes("input")) {
-        evolutionHints.push("Added input constraints");
-      }
-    }
-
-    const feedback = [...new Set([...smartFeedback, ...evolutionHints])];
+    const feedback = buildLevel2ImprovementFeedback({
+      currentPrompt: prompt,
+      previousPrompt: prevPrompt,
+      problem,
+      metrics: {
+        prevReliability: prevDoc?.reliabilityScore,
+        currentReliability: result.reliabilityScore,
+        prevTestPass: testPassPercent(prevDoc),
+        currentTestPass: testPassPercent({
+          testCasesPassed: result.testCasesPassed,
+          totalTestCases: result.totalTestCases,
+        }),
+      },
+    });
 
     const showComparison =
       result.reliabilityScore === 100 || attempts >= 3;
@@ -257,6 +287,7 @@ export const handleLevel2 = async (req, res) => {
       totalTestCases: result.totalTestCases,
       testCaseDetails: result.testCaseResults,
       aiOutput,
+      feedback,
       timestamp: new Date(),
     });
 

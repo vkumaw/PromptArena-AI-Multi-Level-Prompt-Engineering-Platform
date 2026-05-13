@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema({
   totalTestCases: Number,
   testCaseDetails: Array,
   aiOutput: String,
+  feedback: { type: [String], default: [] },
   timestamp: Date
 });
 
