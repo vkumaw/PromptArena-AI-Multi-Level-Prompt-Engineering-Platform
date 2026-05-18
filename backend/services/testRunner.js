@@ -1,8 +1,61 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import fs from "fs";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+
+const PYTHON_CANDIDATES = ["python3", "python", "py"];
+const PYTHON_NOT_FOUND_MSG =
+  "No Python interpreter found. Tried: python3, python, py. Install Python 3 and ensure it is on PATH.";
+
+/** @type {string | null | undefined} */
+let cachedPythonCommand;
+
+/**
+ * Resolve the first available Python executable (python3 → python → py).
+ * @returns {string | null}
+ */
+export function getPythonCommand() {
+  if (cachedPythonCommand !== undefined) {
+    return cachedPythonCommand;
+  }
+
+  for (const cmd of PYTHON_CANDIDATES) {
+    try {
+      execFileSync(cmd, ["--version"], {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: "pipe",
+      });
+      cachedPythonCommand = cmd;
+      return cmd;
+    } catch {
+      /* try next candidate */
+    }
+  }
+
+  cachedPythonCommand = null;
+  return null;
+}
+
+/**
+ * Run a Python script file with the resolved interpreter.
+ * @throws {Error} When no interpreter is available or execution fails
+ */
+function execPythonScript(scriptPath, options = {}) {
+  const python = getPythonCommand();
+  if (!python) {
+    const err = new Error(PYTHON_NOT_FOUND_MSG);
+    err.code = "PYTHON_NOT_FOUND";
+    throw err;
+  }
+
+  return execFileSync(python, [scriptPath], {
+    encoding: "utf8",
+    timeout: 5000,
+    ...options,
+  });
+}
 
 /** Strip markdown fences and language tags from model output before execution */
 export function stripMarkdownCode(raw) {
@@ -71,12 +124,7 @@ except Exception:
 `,
       "utf8"
     );
-    const out = execSync(`py "${scriptPath.replace(/\\/g, "/")}"`, {
-      encoding: "utf8",
-      timeout: 5000,
-    })
-      .toString()
-      .trim();
+    const out = execPythonScript(scriptPath).toString().trim();
     return out === "True";
   } catch {
     return false;
@@ -95,12 +143,27 @@ export function runTestCases(problem, code) {
   }
 
   const functionName = extractFunctionName(code) || "solution";
+  const pythonCmd = getPythonCommand();
+  const pythonMissingMessage = pythonCmd ? null : PYTHON_NOT_FOUND_MSG;
 
   const results = [];
   let passed = 0;
 
   problem.test_cases.forEach((tc, index) => {
     const fileName = `temp_${Date.now()}_${index}.py`;
+
+    if (pythonMissingMessage) {
+      const expectedFlat = stripDecorativeQuotes(tc.expectedOutput);
+      results.push({
+        input: tc.input,
+        expected: expectedFlat,
+        expectedOutput: expectedFlat,
+        actual: pythonMissingMessage,
+        actualOutput: pythonMissingMessage,
+        passed: false,
+      });
+      return;
+    }
 
     try {
       let cleanCode = stripMarkdownCode(code);
@@ -127,7 +190,7 @@ except Exception as e:
 
       fs.writeFileSync(fileName, pythonCode);
 
-      const output = execSync(`py ${fileName}`)
+      const output = execPythonScript(fileName)
         .toString()
         .trim()
         .split("\n")

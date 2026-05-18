@@ -4,9 +4,24 @@ import { detectHallucination } from "../../src/app/utils/hallucination.js";
 import { runTestCases } from "../services/testRunner.js";
 import {
   computePromptScore,
-  isLikelyProblemCopyPaste,
+  applyLevel1PromptQualityAdjustments,
+  capLevel1StructureScore,
+  resolveProblemForSimilarity,
   buildLevel1Feedback,
 } from "./promptQuality.js";
+
+/**
+ * Level 1 reliability only: mostly test pass rate, small prompt-quality term.
+ * reliability = round((testPassRate * 0.82) + (predictedSuccess * 0.18))
+ */
+export function computeLevel1Reliability(testPassRate, predictedSuccess) {
+  const testPct = Number.isFinite(testPassRate) ? testPassRate : 0;
+  const pred = Number.isFinite(predictedSuccess) ? predictedSuccess : 0;
+  return Math.min(
+    100,
+    Math.max(0, Math.round(testPct * 0.82 + pred * 0.18))
+  );
+}
 
 /**
  * @param {string} prompt
@@ -61,36 +76,54 @@ export async function evaluatePrompt(
   // --- Level 1: aligned with Level 2 (prompt quality + test pass rate) ---
 
   const normalizedPrompt = (prompt || "").trim();
-  const testScore = total > 0 ? (passed / total) * 100 : 0;
+  const testPassRate = total > 0 ? (passed / total) * 100 : 0;
 
-  let promptScore = computePromptScore(prompt, problem, { level1: true });
-  const isCopyPaste = isLikelyProblemCopyPaste(normalizedPrompt, problem);
+  const problemForQuality = resolveProblemForSimilarity(problem);
 
-  if (isCopyPaste) {
-    promptScore = Math.min(promptScore, 34);
-  }
+  const basePromptScore = computePromptScore(
+    prompt,
+    problemForQuality,
+    { level1: true }
+  );
+  const rawStructureScore = !normalizedPrompt
+    ? 0
+    : Math.max(1, Math.min(10, Math.round(basePromptScore / 10)));
 
-  const structureScore = !normalizedPrompt
+  const quality = applyLevel1PromptQualityAdjustments(
+    basePromptScore,
+    normalizedPrompt,
+    problemForQuality
+  );
+  const promptScore = quality.promptScore;
+
+  const structureBeforeCap = !normalizedPrompt
     ? 0
     : Math.max(1, Math.min(10, Math.round(promptScore / 10)));
 
-  const predictedSuccess = structureScore * 10;
+  const structureScore = capLevel1StructureScore(structureBeforeCap, quality);
 
-  // Reliability: dominated by test pass rate; prompt quality adds a small nudge only,
-  // and is capped so strong prompts cannot mask widespread test failures.
-  const blended = Math.round(testScore * 0.93 + promptScore * 0.07);
-  const reliability = Math.min(
+  console.log("[Level1 structure score]", {
+    rawStructureScore,
+    similarityPct: Math.round((quality.similarity ?? 0) * 100),
+    structureAfterPromptAdjust: structureBeforeCap,
+    finalStructureScore: structureScore,
+    isCopyPaste: quality.isCopyPaste,
+    addedEngineering: quality.addedEngineering,
+  });
+
+  const predictedSuccess = Math.min(100, Math.max(0, structureScore * 10));
+
+  const reliability = computeLevel1Reliability(testPassRate, predictedSuccess);
+
+  const effectiveness = Math.min(
     100,
-    Math.max(0, Math.min(blended, testScore + 12))
-  );
-
-  const effectiveness = Math.round(
-    predictedSuccess * 0.5 + reliability * 0.5
+    Math.max(0, Math.round(predictedSuccess * 0.5 + reliability * 0.5))
   );
 
   const feedback = buildLevel1Feedback(normalizedPrompt, problem, {
-    isCopyPaste,
-    testPassRate: Math.round(testScore),
+    isCopyPaste: quality.isCopyPaste,
+    highSimilarity: quality.highSimilarity,
+    testPassRate: Math.round(testPassRate),
   });
 
   return {
@@ -101,7 +134,7 @@ export async function evaluatePrompt(
     passed,
     total,
     promptScore: Math.round(promptScore),
-    testPassRate: Math.round(testScore),
+    testPassRate: Math.round(testPassRate),
     feedback,
   };
 }

@@ -159,31 +159,43 @@ export function normalizePromptForCompare(text) {
     .trim();
 }
 
-/**
- * True when the user prompt is essentially the official problem text (no added engineering).
- */
-export function isLikelyProblemCopyPaste(prompt, problem) {
-  const p = normalizePromptForCompare(prompt);
-  const d = normalizePromptForCompare(problem?.description || "");
-  if (!p || !d || d.length < 20) return false;
-  if (p === d) return true;
-  const longer = p.length >= d.length ? p : d;
-  const shorter = p.length >= d.length ? d : p;
-  if (longer.includes(shorter) && shorter.length >= longer.length * 0.88) return true;
-  const overlap = tokenSetOverlap(p, d);
-  return overlap >= 0.82 && Math.abs(p.length - d.length) / Math.max(d.length, 1) < 0.12;
+function problemReferenceText(problem) {
+  return [
+    problem?.description,
+    problem?.problemStatement,
+    problem?.statement,
+    problem?.title,
+    problem?.expected_output,
+    problem?.expectedOutput,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Normalize problem fields used for similarity (handles partial API payloads). */
+export function resolveProblemForSimilarity(problem) {
+  if (!problem) return problem;
+  const description =
+    problem.description ||
+    problem.problemStatement ||
+    problem.statement ||
+    "";
+  if (description === problem.description) return problem;
+  return { ...problem, description };
+}
+
+function tokenSet(a) {
+  return new Set(
+    a
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length > 2)
+  );
 }
 
 function tokenSetOverlap(a, b) {
-  const words = (s) =>
-    new Set(
-      s
-        .split(/\s+/)
-        .map((w) => w.trim())
-        .filter((w) => w.length > 2)
-    );
-  const A = words(a);
-  const B = words(b);
+  const A = tokenSet(a);
+  const B = tokenSet(b);
   if (A.size === 0 || B.size === 0) return 0;
   let inter = 0;
   for (const w of A) {
@@ -192,19 +204,221 @@ function tokenSetOverlap(a, b) {
   return inter / Math.max(A.size, B.size);
 }
 
+function jaccardTokenSimilarity(a, b) {
+  const A = tokenSet(a);
+  const B = tokenSet(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const w of A) {
+    if (B.has(w)) inter++;
+  }
+  const union = A.size + B.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+function similarityAgainstReference(p, ref) {
+  if (!p || !ref || ref.length < 12) return 0;
+  if (p === ref) return 1;
+
+  let sim = Math.max(tokenSetOverlap(p, ref), jaccardTokenSimilarity(p, ref));
+
+  const longer = p.length >= ref.length ? p : ref;
+  const shorter = p.length >= ref.length ? ref : p;
+  if (longer.includes(shorter) && shorter.length / longer.length >= 0.82) {
+    sim = Math.max(sim, 0.86 + 0.14 * (shorter.length / longer.length));
+  }
+
+  const lenRatio = Math.min(p.length, ref.length) / Math.max(p.length, ref.length);
+  if (lenRatio >= 0.9 && sim >= 0.72) {
+    sim = Math.max(sim, 0.9);
+  }
+
+  return Math.min(1, sim);
+}
+
+/**
+ * 0–1 similarity between user prompt and official problem text (description, title, combined ref).
+ */
+export function computeProblemSimilarity(prompt, problem) {
+  const p = normalizePromptForCompare(prompt);
+  if (!p) return 0;
+
+  const refs = [
+    problem?.description,
+    problemReferenceText(problem),
+    problem?.title,
+  ]
+    .filter(Boolean)
+    .map(normalizePromptForCompare);
+
+  let maxSim = 0;
+  for (const ref of refs) {
+    maxSim = Math.max(maxSim, similarityAgainstReference(p, ref));
+  }
+  return maxSim;
+}
+
+/** Prompt-engineering signals that should not count when already present in the problem statement. */
+const ENGINEERING_SIGNALS = [
+  { test: /edge\s*cases?|boundary\s*cases?|corner\s*cases?/i },
+  { test: /constraints?|invariant|must\s+not|should\s+not|only\s+accept/i },
+  { test: /optimi|complexity|o\s*\(|time\s+complex|space\s+complex|efficient/i },
+  { test: /error\s+handl|raise\s+\w+|try\s*:|except\s+/i },
+  { test: /examples?|unit\s+tests?|test\s+cases?|assert\s+|for\s+example/i },
+  {
+    test: /input\s+(type|format|range)|output\s+(type|format)|parameter\s+type|return\s+type|returns?\s+(a\s+)?bool/i,
+  },
+  { test: /\bdef\s+[a-z_]\w*\s*\(|\bfunction\s+[a-z_]\w*\s*\(/i },
+  {
+    test: /negative|n\s*[<≤]=|less\s+than\s+2|zero|null|empty\s+(list|array|string)|non[- ]?prime/i,
+  },
+  { test: /sqrt|square\s+root|trial\s+divis|divisors?\s+up\s+to|modulo/i },
+];
+
+const PROMPT_COMPARE_STOP = new Set([
+  "write",
+  "python",
+  "function",
+  "returns",
+  "that",
+  "the",
+  "and",
+  "with",
+  "from",
+  "this",
+  "given",
+  "your",
+  "code",
+  "program",
+  "handle",
+  "cases",
+  "like",
+  "numbers",
+  "number",
+  "otherwise",
+  "true",
+  "false",
+]);
+
+function fractionPromptTokensBeyondProblem(prompt, problem) {
+  const ref = normalizePromptForCompare(problemReferenceText(problem));
+  const refWords = new Set(ref.split(/\s+/));
+  const promptWords = normalizePromptForCompare(prompt)
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !PROMPT_COMPARE_STOP.has(w));
+  if (promptWords.length === 0) return 0;
+  const extra = promptWords.filter((w) => !refWords.has(w));
+  return extra.length / promptWords.length;
+}
+
+/**
+ * True when the prompt adds specification beyond the official problem text.
+ */
+export function hasUserAddedEngineering(prompt, problem) {
+  const ref = normalizePromptForCompare(problemReferenceText(problem));
+  const pl = prompt || "";
+  if (!ref) return false;
+
+  for (const { test } of ENGINEERING_SIGNALS) {
+    if (test.test(pl) && !test.test(ref)) return true;
+  }
+
+  if (fractionPromptTokensBeyondProblem(pl, problem) >= 0.2) return true;
+
+  return false;
+}
+
+/**
+ * Level 1: penalize high-similarity prompts unless the user added real engineering detail.
+ * @returns {{ promptScore: number, similarity: number, highSimilarity: boolean, isCopyPaste: boolean, addedEngineering: boolean }}
+ */
+const LEVEL1_HIGH_SIMILARITY = 0.8;
+
+export function applyLevel1PromptQualityAdjustments(promptScore, prompt, problem) {
+  const resolved = resolveProblemForSimilarity(problem);
+  const similarity = computeProblemSimilarity(prompt, resolved);
+  const addedEngineering = hasUserAddedEngineering(prompt, resolved);
+  const highSimilarity = similarity >= LEVEL1_HIGH_SIMILARITY;
+  const isCopyPaste = highSimilarity && !addedEngineering;
+
+  let score = promptScore;
+
+  if (similarity >= 0.9 && !addedEngineering) {
+    score = Math.min(score, 40);
+  } else if (similarity >= 0.85 && !addedEngineering) {
+    score = Math.min(score, 45);
+  } else if (highSimilarity && !addedEngineering) {
+    score = Math.min(score, 50);
+  } else if (highSimilarity && addedEngineering) {
+    score = Math.min(score, 72);
+  }
+
+  return {
+    promptScore: score,
+    similarity,
+    highSimilarity,
+    isCopyPaste,
+    addedEngineering,
+  };
+}
+
+/**
+ * Hard cap on structure score (1–10) AFTER normal scoring when prompt ≈ problem statement.
+ * Example: raw 8/10 at 92% similarity → min(8, 5) = 5/10.
+ */
+export function capLevel1StructureScore(rawStructureScore, quality) {
+  const raw = Number.isFinite(rawStructureScore) ? rawStructureScore : 0;
+  const sim = quality?.similarity ?? 0;
+  const added = quality?.addedEngineering ?? false;
+
+  if (sim < LEVEL1_HIGH_SIMILARITY) return raw;
+
+  if (!added) {
+    if (sim >= 0.9) return Math.min(raw, 4);
+    return Math.min(raw, 5);
+  }
+
+  if (sim >= 0.88) return Math.min(raw, 8);
+  return raw;
+}
+
+/**
+ * True when the user prompt is essentially the official problem text (no added engineering).
+ */
+export function isLikelyProblemCopyPaste(prompt, problem) {
+  const p = normalizePromptForCompare(prompt);
+  const ref = normalizePromptForCompare(problemReferenceText(problem));
+  if (!p || !ref || ref.length < 20) return false;
+  if (computeProblemSimilarity(prompt, problem) >= LEVEL1_HIGH_SIMILARITY) {
+    return !hasUserAddedEngineering(prompt, problem);
+  }
+  if (p === ref) return true;
+  const longer = p.length >= ref.length ? p : ref;
+  const shorter = p.length >= ref.length ? ref : p;
+  if (longer.includes(shorter) && shorter.length >= longer.length * 0.88) {
+    return !hasUserAddedEngineering(prompt, problem);
+  }
+  const overlap = tokenSetOverlap(p, ref);
+  return (
+    overlap >= 0.82 &&
+    Math.abs(p.length - ref.length) / Math.max(ref.length, 1) < 0.12 &&
+    !hasUserAddedEngineering(prompt, problem)
+  );
+}
+
 /**
  * Level 1 learning feedback: gaps + copy-paste warning + problem-aware nudge.
  */
 export function buildLevel1Feedback(
   prompt,
   problem,
-  { isCopyPaste, testPassRate } = {}
+  { isCopyPaste, highSimilarity, testPassRate } = {}
 ) {
   const gaps = buildSmartFeedbackGaps(prompt, problem);
   const out = [];
-  if (isCopyPaste) {
+  if (isCopyPaste || highSimilarity) {
     out.push(
-      "Your prompt closely matches the problem statement alone. Add your own specification: function name, parameter types, return rules, and edge cases to improve your score."
+      "Your prompt closely matches the original problem statement. Add constraints, edge cases, formatting rules, or optimization requirements to improve your prompt-engineering score."
     );
   }
   out.push(...gaps);
