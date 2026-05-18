@@ -25,49 +25,47 @@ import {
 
 import { apiClient } from "../services/api";
 import type { AnalyticsResponse } from "../services/contracts";
+import { authService } from "../utils/auth";
 
 export function AnalyticsPage() {
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     const loadAnalytics = async () => {
+      setIsLoading(true);
+      setLoadError("");
       try {
-        const data = await apiClient.fetchAnalytics();
+        const user = authService.getCurrentUser();
+        const userId = user?.id ?? "guest-user";
+        const data = await apiClient.fetchAnalytics(userId);
         setAnalytics(data);
       } catch (error) {
         console.error("Failed to load analytics:", error);
+        setLoadError("Unable to load analytics. Try again later.");
+        setAnalytics(null);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    loadAnalytics();
+    void loadAnalytics();
   }, []);
 
-  const totalPrompts = analytics?.totalPrompts || 47;
-const successRate = analytics?.successRate || 78;
-const averageScore = analytics?.averageScore || 82;
-const improvement = analytics?.improvement || 23;
+  const totalPrompts = analytics?.totalPrompts ?? 0;
+  const successRate = analytics?.successRate ?? 0;
+  const averageScore = analytics?.averageScore ?? 0;
+  const improvement = analytics?.improvement ?? 0;
+  const improvementLabel =
+    improvement > 0 ? `+${improvement}` : `${improvement}`;
 
-const scoreHistory =
-  analytics?.scoreHistory?.length
-    ? analytics.scoreHistory
-    : [
-        { date: "2026-03-01", score: 65 },
-        { date: "2026-03-08", score: 70 },
-        { date: "2026-03-15", score: 74 },
-        { date: "2026-03-22", score: 79 },
-        { date: "2026-04-05", score: 85 },
-      ];
-
-const categoryBreakdown =
-  analytics?.categoryBreakdown?.length
-    ? analytics.categoryBreakdown
-    : [
-        { category: "Clarity", score: 85 },
-        { category: "Specificity", score: 78 },
-        { category: "Context", score: 82 },
-        { category: "Constraints", score: 80 },
-        { category: "Format", score: 88 },
-      ];
+  const scoreHistory = analytics?.scoreHistory ?? [];
+  const categoryBreakdown = analytics?.categoryBreakdown ?? [
+    { category: "Prompt Quality", score: 0 },
+    { category: "Reliability", score: 0 },
+    { category: "Ethics", score: 0 },
+  ];
 
   return (
     <div className="min-h-screen bg-background">
@@ -86,6 +84,15 @@ const categoryBreakdown =
           <p className="text-muted-foreground">
             Analyze prompt quality, reliability, and overall performance trends
           </p>
+          {loadError ? (
+            <p className="text-sm text-red-500 mt-2">{loadError}</p>
+          ) : null}
+          {!isLoading && totalPrompts === 0 ? (
+            <p className="text-sm text-muted-foreground mt-2">
+              No submissions yet. Complete Level 1–3 exercises to see your stats
+              here.
+            </p>
+          ) : null}
         </div>
 
         {/* Stats Grid */}
@@ -162,7 +169,7 @@ const categoryBreakdown =
             </div>
 
             <div className="text-4xl font-bold mb-1">
-              +{improvement}%
+              {improvementLabel}%
             </div>
 
             <div className="text-sm text-muted-foreground">
@@ -180,7 +187,13 @@ const categoryBreakdown =
             </h2>
 
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={scoreHistory}>
+              <LineChart
+                data={
+                  scoreHistory.length > 0
+                    ? scoreHistory
+                    : [{ date: "No data", score: 0 }]
+                }
+              >
                 <CartesianGrid
                   strokeDasharray="3 3"
                   stroke="hsl(var(--border))"
@@ -279,13 +292,7 @@ const categoryBreakdown =
           </h2>
 
           <ResponsiveContainer width="100%" height={400}>
-            <RadarChart
-              data={[
-                { category: "Prompt Quality", score: 85 },
-                { category: "Reliability", score: 78 },
-                { category: "Ethics", score: 90 },
-              ]}
-            >
+            <RadarChart data={categoryBreakdown}>
               <PolarGrid />
 
               <PolarAngleAxis

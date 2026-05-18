@@ -11,7 +11,7 @@ import {
   type Level3Response,
   type PromptVersion,
 } from './contracts';
-import { mockAnalytics, mockLeaderboard } from '../utils/mockData';
+import { mockLeaderboard } from '../utils/mockData';
 import { problems20 } from '../data/problems';
 import { generateFeedback, trackPromptEvolution } from '../utils';
 import { evaluatePrompt } from '../utils/scoring.js';
@@ -26,9 +26,11 @@ import { level3CodingProblems } from '../../../shared/level3CodingProblems.js';
 import {
   analyzeAiResponseSnippet,
   scoreReasonExplanation,
+  applyReflectionCompositeAdjustment,
   type AiSnippetAnalysis,
   type ReasonExplanationScore,
 } from '../../../shared/level3CodingAnalyze.js';
+import type { Level3HistoryRecord } from './contracts';
 import { apiPath } from '../utils/apiBase';
 
 /** Minimal problem fields used by Level 3 mock scoring */
@@ -41,6 +43,13 @@ interface Level3ProblemMeta {
 }
 
 const API_MODE = (import.meta.env.VITE_API_MODE || 'mock').toLowerCase();
+
+/** Mock-only: Level 3 coding attempts per userId+problemId */
+const mockLevel3Attempts = new Map<string, Level3HistoryRecord[]>();
+
+function mockLevel3Key(userId: string, problemId: string) {
+  return `${userId}::${problemId}`;
+}
 
 /** Same URL rules as Level 1/2: apiPath when base is set, else Vite proxy `/api/*`. */
 function resolveHttpApiUrl(path: string): string {
@@ -281,6 +290,18 @@ const mockApi: ApiClient = {
     const userHallucinationAnswerCorrect =
       userBelief === null ? null : userBelief === gt;
 
+    const uid = payload.userId || 'guest-user';
+    const key = mockLevel3Key(uid, pid);
+    const prior = mockLevel3Attempts.get(key) ?? [];
+    if (prior.length >= 3) {
+      throw new Error('Maximum 3 attempts reached for this coding problem.');
+    }
+
+    const adjustedComposite = applyReflectionCompositeAdjustment(
+      analysis.compositeScore,
+      userHallucinationAnswerCorrect
+    );
+
     const rationale = [
       `Ground truth for "${problem.title}": ${gt ? 'Yes — treat as hallucinating / unreliable.' : 'No — not labeled as hallucination for this drill.'}`,
       `Automated scan: ${analysis.intrinsicHallucination ? 'Issues found (deps / logic).' : 'No strong hallucination signals.'}`,
@@ -291,6 +312,20 @@ const mockApi: ApiClient = {
           : 'Your Yes/No differs from this exercise ground truth.',
       `Explanation rubric: ${reasonScoring.reasonQualityLabel} (${reasonScoring.reasonQualityScore}/100).`,
     ].join(' ');
+
+    const attempts = prior.length + 1;
+    const record: Level3HistoryRecord = {
+      attempt: attempts,
+      compositeScore: adjustedComposite,
+      reasonQualityScore: reasonScoring.reasonQualityScore,
+      believesHallucination: userBelief,
+      reliabilityScore: analysis.reliabilityScore,
+      userPrompt: payload.userPrompt ?? '',
+      aiResponseText: snippet,
+      timestamp: new Date().toISOString(),
+      matchedKeywords: reasonScoring.matchedKeywords,
+    };
+    mockLevel3Attempts.set(key, [...prior, record]);
 
     return {
       hallucinationDetected: analysis.intrinsicHallucination,
@@ -305,10 +340,11 @@ const mockApi: ApiClient = {
       reliabilityScore: analysis.reliabilityScore,
       outputQualityScore: analysis.outputQualityScore,
       securityRating: analysis.securityRating,
-      compositeScore: analysis.compositeScore,
-      reliabilityAdjustment: analysis.compositeScore,
+      compositeScore: adjustedComposite,
+      reliabilityAdjustment: adjustedComposite,
       rationale,
       userPromptReceived: payload.userPrompt ?? '',
+      attempts,
     };
   },
 
@@ -317,18 +353,31 @@ const mockApi: ApiClient = {
     return mockLeaderboard.map((entry) => ({ ...entry }));
   },
 
-  async fetchAnalytics(): Promise<AnalyticsResponse> {
+  async fetchAnalytics(_userId: string): Promise<AnalyticsResponse> {
     await wait(300);
     return {
-      totalPrompts: mockAnalytics.totalPrompts,
-      successRate: mockAnalytics.successRate,
-      averageScore: mockAnalytics.averageScore,
-      improvement: mockAnalytics.improvement,
-      scoreHistory: [...mockAnalytics.scoreHistory],
-      categoryBreakdown: [...mockAnalytics.categoryBreakdown],
+      totalPrompts: 0,
+      successRate: 0,
+      averageScore: 0,
+      improvement: 0,
+      scoreHistory: [],
+      categoryBreakdown: [
+        { category: 'Prompt Quality', score: 0 },
+        { category: 'Reliability', score: 0 },
+        { category: 'Ethics', score: 0 },
+      ],
     };
   },
 };
+
+/** Mock Level 3 history (used when VITE_API_MODE=mock). */
+export function getMockLevel3History(
+  userId: string,
+  problemId: string
+): { attempts: number; records: Level3HistoryRecord[] } {
+  const records = mockLevel3Attempts.get(mockLevel3Key(userId, problemId)) ?? [];
+  return { attempts: records.length, records };
+}
 
 const postJson = async <TResponse>(
   path: string,
@@ -386,8 +435,11 @@ const httpApi: ApiClient = {
     }
     return (await response.json()) as LeaderboardEntry[];
   },
-  async fetchAnalytics() {
-    const response = await fetch(resolveHttpApiUrl('/analytics'));
+  async fetchAnalytics(userId: string) {
+    const q = new URLSearchParams({ userId });
+    const response = await fetch(
+      resolveHttpApiUrl(`/analytics?${q.toString()}`)
+    );
     if (!response.ok) {
       throw new Error(`API request failed: ${response.status}`);
     }

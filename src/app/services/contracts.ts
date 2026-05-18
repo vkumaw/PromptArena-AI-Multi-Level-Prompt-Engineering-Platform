@@ -135,7 +135,25 @@ export interface Level3Request {
   reasonExplanation?: string;
 }
 
+export interface Level3HistoryRecord {
+  attempt: number;
+  compositeScore: number;
+  reasonQualityScore: number;
+  believesHallucination: boolean | null;
+  reliabilityScore: number;
+  userPrompt: string;
+  aiResponseText: string;
+  timestamp: string;
+  matchedKeywords: string[];
+}
+
+export interface Level3HistoryResponse {
+  attempts: number;
+  records: Level3HistoryRecord[];
+}
+
 export interface Level3Response {
+  attempts?: number;
   ethicalIntegrityScore?: number;
   /** Intrinsic scan of pasted AI output */
   hallucinationDetected?: boolean;
@@ -189,5 +207,5 @@ export interface ApiClient {
   submitLevel2Prompt(payload: Level2Request): Promise<Level2Response>;
   submitLevel3Scenario(payload: Level3Request): Promise<Level3Response>;
   fetchLeaderboard(): Promise<LeaderboardEntry[]>;
-  fetchAnalytics(): Promise<AnalyticsResponse>;
+  fetchAnalytics(userId: string): Promise<AnalyticsResponse>;
 }
