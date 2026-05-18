@@ -23,6 +23,30 @@ export async function generateCode(prompt) {
 
   return data?.choices?.[0]?.message?.content || "No response";
 }
+export const fetchLevel1History = async (problemId, token) => {
+  const response = await fetch(
+    apiPath(`/level1/history?problemId=${encodeURIComponent(problemId)}`),
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Invalid response from server.");
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.error || "Failed to load saved attempt");
+  }
+
+  return data;
+};
+
 export const generateCodeFromAI = async (prompt, problem, token) => {
   let response;
   try {

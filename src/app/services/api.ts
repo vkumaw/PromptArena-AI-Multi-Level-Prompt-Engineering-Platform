@@ -73,10 +73,7 @@ const mockApi: ApiClient = {
       100,
       Math.max(
         0,
-        Math.min(
-          Math.round(mockTestPassRate * 0.93 + promptScoreApprox * 0.07),
-          mockTestPassRate + 12
-        )
+        Math.round(mockTestPassRate * 0.82 + promptScoreApprox * 0.18)
       )
     );
     const effectivenessScore = clamp(Math.round(evalResult.effectiveness), 0, 100);

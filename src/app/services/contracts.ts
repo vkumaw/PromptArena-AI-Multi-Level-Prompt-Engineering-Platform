@@ -40,6 +40,14 @@ export interface Level1Response {
   promptScore?: number;
   /** Actionable hints to improve the prompt. */
   feedback?: string[];
+  /** Set when resubmitting a problem that already has a saved attempt. */
+  alreadyAttempted?: boolean;
+  savedResult?: Omit<Level1Response, 'alreadyAttempted' | 'savedResult'>;
+}
+
+export interface Level1HistoryResponse {
+  attempted: boolean;
+  savedResult: Level1Response | null;
 }
 
 export interface PromptVersion {

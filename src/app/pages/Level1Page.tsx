@@ -1,17 +1,102 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navbar } from '../components/Navbar';
 import { Send, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import type { CodingProblem, Level1Response } from '../services/contracts';
 import { setLevelCompleted } from '../utils/progress';
-import { generateCodeFromAI } from "../services/aiService";
+import { fetchLevel1History, generateCodeFromAI } from "../services/aiService";
 import { level1Problems } from "../data/problems";
+
+function buildSuggestion(
+  structureScore: number,
+  feedbackList: string[],
+  promptLower: string
+): string {
+  if (feedbackList.length > 0) {
+    return 'Review the feedback below and revise your prompt.';
+  }
+  if (structureScore < 4) {
+    return 'Specify language, input/output and constraints.';
+  }
+  if (structureScore < 7) {
+    const mentionsEdges = /edge|negative|zero|null|constraint|invalid|boundary/.test(
+      promptLower
+    );
+    return mentionsEdges
+      ? 'You hinted at edge cases; spell out return type, inputs, and any algorithm details (e.g. check divisors up to √n) to raise your structure score.'
+      : 'Try adding edge cases and expected behavior.';
+  }
+  return 'Well-structured prompt!';
+}
+
+function formatLevel1Response(
+  raw: Record<string, unknown>,
+  promptText: string
+): Level1Response {
+  const feedbackList = Array.isArray(raw.feedback)
+    ? (raw.feedback as string[])
+    : [];
+  const reliabilityFromApi =
+    typeof raw.reliabilityScore === 'number'
+      ? raw.reliabilityScore
+      : typeof raw.reliability === 'number'
+        ? raw.reliability
+        : 0;
+  const effectivenessFromApi =
+    typeof raw.effectivenessScore === 'number'
+      ? raw.effectivenessScore
+      : typeof raw.effectiveness === 'number'
+        ? raw.effectiveness
+        : 0;
+  const structureScore =
+    typeof raw.structureScore === 'number' ? raw.structureScore : 0;
+  const promptLower = promptText.trim().toLowerCase();
+
+  return {
+    structureScore,
+    successProbability:
+      typeof raw.successProbability === 'number'
+        ? raw.successProbability
+        : typeof raw.predictedSuccess === 'number'
+          ? raw.predictedSuccess
+          : 0,
+    generatedCode: typeof raw.generatedCode === 'string' ? raw.generatedCode : '',
+    reliabilityScore: reliabilityFromApi,
+    effectivenessScore: effectivenessFromApi,
+    testCasesPassed:
+      typeof raw.testCasesPassed === 'number'
+        ? raw.testCasesPassed
+        : typeof raw.passed === 'number'
+          ? raw.passed
+          : 0,
+    totalTestCases:
+      typeof raw.totalTestCases === 'number'
+        ? raw.totalTestCases
+        : typeof raw.total === 'number'
+          ? raw.total
+          : 0,
+    testCaseResults: Array.isArray(raw.testCaseResults)
+      ? (raw.testCaseResults as Level1Response['testCaseResults'])
+      : [],
+    testPassRate:
+      typeof raw.testPassRate === 'number' ? raw.testPassRate : undefined,
+    promptScore:
+      typeof raw.promptScore === 'number' ? raw.promptScore : undefined,
+    feedback: feedbackList,
+    suggestion: buildSuggestion(structureScore, feedbackList, promptLower),
+  };
+}
 
 export function Level1Page() {
   const [problems, setProblems] = useState<CodingProblem[]>([]);
   const [selectedProblemId, setSelectedProblemId] = useState('');
   
   const [result, setResult] = useState<Level1Response | null>(null);
+  const [persistedView, setPersistedView] = useState<Level1Response | null>(null);
+  const [attemptCompletedMap, setAttemptCompletedMap] = useState<
+    Record<string, boolean>
+  >({});
   const [isLoading, setIsLoading] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [error, setError] = useState('');
   const [isProblemsLoading, setIsProblemsLoading] = useState(true);
   const [attempts, setAttempts] = useState(0);
@@ -22,7 +107,7 @@ export function Level1Page() {
     const loadProblems = async () => {
       try {
         setProblems(level1Problems);
-setSelectedProblemId(level1Problems[0]?.problem_id || '');
+        setSelectedProblemId(level1Problems[0]?.problem_id || '');
       } catch {
         setError('Unable to load problems.');
       } finally {
@@ -32,94 +117,128 @@ setSelectedProblemId(level1Problems[0]?.problem_id || '');
     void loadProblems();
   }, []);
 
+  const loadHistoryForProblem = useCallback(async (problemId: string) => {
+    if (!problemId) return false;
+    const token = localStorage.getItem('token');
+    if (!token) return false;
+
+    setIsHistoryLoading(true);
+    try {
+      const data = await fetchLevel1History(problemId, token);
+      if (data.attempted && data.savedResult) {
+        const saved = data.savedResult as Record<string, unknown>;
+        const savedPrompt =
+          typeof saved.prompt === 'string' ? saved.prompt : '';
+        const formatted = formatLevel1Response(saved, savedPrompt);
+        setPersistedView(formatted);
+        setPrompt(savedPrompt);
+        setAttemptCompletedMap((prev) => ({ ...prev, [problemId]: true }));
+        return true;
+      }
+      setPersistedView(null);
+      setAttemptCompletedMap((prev) => ({ ...prev, [problemId]: false }));
+      return false;
+    } catch {
+      return false;
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProblemId) return;
+    setResult(null);
+    setError('');
+    void loadHistoryForProblem(selectedProblemId);
+  }, [selectedProblemId, loadHistoryForProblem]);
+
   const selectedProblem = useMemo(
     () => problems.find((problem) => problem.problem_id === selectedProblemId) || null,
     [problems, selectedProblemId]
   );
 
+  const isAttemptCompleted = Boolean(attemptCompletedMap[selectedProblemId]);
+  const view = result ?? persistedView;
+
   const handleSubmit = async () => {
-  if (!prompt.trim() || !selectedProblem) return;
+    if (!prompt.trim() || !selectedProblem) return;
 
-  setIsLoading(true);
-  setError("");
-
-  try {
-    const nextAttempts = attempts + 1;
-    const token = localStorage.getItem("token");
-
-    if (!token) {
-      throw new Error("Please login again to continue.");
+    if (isAttemptCompleted) {
+      await loadHistoryForProblem(selectedProblemId);
+      setError('');
+      return;
     }
 
-    const response = await generateCodeFromAI(prompt, selectedProblem, token);
-    const raw = response as Record<string, unknown>;
+    setIsLoading(true);
+    setError("");
 
-   const feedbackList = Array.isArray(response.feedback)
-    ? (response.feedback as string[])
-    : [];
-    const reliabilityFromApi =
-      typeof response.reliabilityScore === 'number'
-        ? response.reliabilityScore
-        : typeof raw.reliability === 'number'
-          ? raw.reliability
-          : 0;
-    const effectivenessFromApi =
-      typeof response.effectivenessScore === 'number'
-        ? response.effectivenessScore
-        : typeof raw.effectiveness === 'number'
-          ? raw.effectiveness
-          : 0;
-    const promptLower = prompt.trim().toLowerCase();
-    const mentionsEdges = /edge|negative|zero|null|constraint|invalid|boundary/.test(
-      promptLower
-    );
+    try {
+      const token = localStorage.getItem("token");
 
-   const formattedResponse: Level1Response = {
-  structureScore: response.structureScore ?? 0,
-  successProbability: response.successProbability ?? 0,
-  generatedCode: response.generatedCode ?? "",
-  reliabilityScore: reliabilityFromApi,
-  effectivenessScore: effectivenessFromApi,
-  testCasesPassed: response.testCasesPassed ?? 0,
-  totalTestCases: response.totalTestCases ?? 0,
-  testCaseResults: response.testCaseResults ?? [],
-  testPassRate: typeof response.testPassRate === 'number' ? response.testPassRate : undefined,
-  promptScore: typeof response.promptScore === 'number' ? response.promptScore : undefined,
-  feedback: feedbackList,
+      if (!token) {
+        throw new Error("Please login again to continue.");
+      }
 
-  suggestion:
-    feedbackList.length > 0
-      ? 'Review the feedback below and revise your prompt.'
-      : (response.structureScore ?? 0) < 4
-        ? 'Specify language, input/output and constraints.'
-        : (response.structureScore ?? 0) < 7
-          ? mentionsEdges
-            ? 'You hinted at edge cases; spell out return type, inputs, and any algorithm details (e.g. check divisors up to √n) to raise your structure score.'
-            : 'Try adding edge cases and expected behavior.'
-          : 'Well-structured prompt!',
-};
+      const response = await generateCodeFromAI(prompt, selectedProblem, token);
+      const raw = response as Record<string, unknown>;
 
-    setResult(formattedResponse);
-    setAttempts(nextAttempts);
+      if (raw.alreadyAttempted && raw.savedResult) {
+        const saved = raw.savedResult as Record<string, unknown>;
+        const savedPrompt =
+          typeof saved.prompt === 'string' ? saved.prompt : prompt;
+        const formatted = formatLevel1Response(saved, savedPrompt);
+        setPersistedView(formatted);
+        setPrompt(savedPrompt);
+        setResult(null);
+        setAttemptCompletedMap((prev) => ({
+          ...prev,
+          [selectedProblemId]: true,
+        }));
+        return;
+      }
 
-    setLowScoreAttempts((count) =>
-      formattedResponse.structureScore < 4 ? count + 1 : 0
-    );
+      const formattedResponse = formatLevel1Response(raw, prompt);
 
-    if (formattedResponse.structureScore >= 8) {
-      setLevelCompleted(1);
+      setResult(formattedResponse);
+      setPersistedView(null);
+      setAttemptCompletedMap((prev) => ({
+        ...prev,
+        [selectedProblemId]: true,
+      }));
+
+      const nextAttempts = attempts + 1;
+      setAttempts(nextAttempts);
+
+      setLowScoreAttempts((count) =>
+        formattedResponse.structureScore < 4 ? count + 1 : 0
+      );
+
+      if (formattedResponse.structureScore >= 8) {
+        setLevelCompleted(1);
+      }
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Unable to evaluate prompt. Please try again."
+      );
+    } finally {
+      setIsLoading(false);
     }
+  };
 
-  } catch (submitError) {
-    setError(
-      submitError instanceof Error
-        ? submitError.message
-        : "Unable to evaluate prompt. Please try again."
-    );
-  } finally {
-    setIsLoading(false);
-  }
-};
+  const handleSelectProblem = (problemId: string) => {
+    setSelectedProblemId(problemId);
+    setResult(null);
+    setError('');
+    if (!attemptCompletedMap[problemId]) {
+      setPrompt('');
+      setPersistedView(null);
+    }
+    setAttempts(0);
+    setLowScoreAttempts(0);
+  };
+
   const safeTestCases = selectedProblem?.test_cases ?? [];
 
   return (
@@ -129,7 +248,7 @@ setSelectedProblemId(level1Problems[0]?.problem_id || '');
       <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3 mb-3 flex-wrap">
             <div className="px-3 py-1 bg-blue-500/20 text-blue-500 rounded-lg text-sm font-medium">
               Level 1
             </div>
@@ -144,6 +263,11 @@ setSelectedProblemId(level1Problems[0]?.problem_id || '');
             >
               {selectedProblem?.difficulty || 'N/A'}
             </div>
+            {isAttemptCompleted && (
+              <div className="px-3 py-1 bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-lg text-sm font-medium">
+                Attempt already completed
+              </div>
+            )}
           </div>
           <h1 className="text-3xl font-bold text-foreground mb-2">
             {selectedProblem?.title || 'Select a problem'}
@@ -159,13 +283,7 @@ setSelectedProblemId(level1Problems[0]?.problem_id || '');
   {problems.map((problem) => (
     <div
       key={problem.problem_id}
-      onClick={() => {
-        setSelectedProblemId(problem.problem_id);
-        setPrompt('');
-        setResult(null);
-        setAttempts(0);
-        setLowScoreAttempts(0);
-      }}
+      onClick={() => handleSelectProblem(problem.problem_id)}
       className={`cursor-pointer p-4 rounded-xl border transition-all
         ${
           selectedProblemId === problem.problem_id
@@ -236,77 +354,110 @@ setSelectedProblemId(level1Problems[0]?.problem_id || '');
           <div className="bg-card border border-border rounded-xl p-6 text-card-foreground">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Output</h2>
-              {result && (
+              {view && (
                 <div className="flex items-center gap-2">
-                  {result.reliabilityScore >= 80 ? (
+                  {view.reliabilityScore >= 80 ? (
                     <CheckCircle className="size-5 text-green-500" />
                   ) : (
                     <XCircle className="size-5 text-yellow-500" />
                   )}
                   <span className="font-semibold text-lg text-foreground">
-                    Reliability: {result.reliabilityScore}%
+                    Reliability: {view.reliabilityScore}%
                   </span>
                 </div>
               )}
             </div>
 
-            {isLoading ? (
+            {isLoading || isHistoryLoading ? (
               <div className="flex flex-col items-center justify-center py-16">
                 <Loader2 className="size-12 text-violet-500 animate-spin mb-4" />
                 <p className="text-muted-foreground">
-                  Processing your prompt...
+                  {isLoading ? 'Processing your prompt...' : 'Loading saved attempt...'}
                 </p>
               </div>
             ) : error ? (
               <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 text-sm text-destructive">
                 {error}
               </div>
-            ) : result ? (
+            ) : view ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div className="bg-accent/50 rounded-lg p-3">
-                    Prompt Structure Score: <span className="font-semibold">{result.structureScore}/10</span>
+                    Prompt Structure Score: <span className="font-semibold">{view.structureScore}/10</span>
                   </div>
                   <div className="bg-accent/50 rounded-lg p-3">
-                    Predicted Success: <span className="font-semibold">{result.successProbability}%</span>
+                    Predicted Success: <span className="font-semibold">{view.successProbability}%</span>
                   </div>
                   <div className="bg-accent/50 rounded-lg p-3">
-                    Reliability Score: <span className="font-semibold">{result.reliabilityScore}%</span>
+                    Reliability Score: <span className="font-semibold">{view.reliabilityScore}%</span>
                   </div>
                   <div className="bg-accent/50 rounded-lg p-3">
-                    Effectiveness Score: <span className="font-semibold">{result.effectivenessScore}%</span>
+                    Effectiveness Score: <span className="font-semibold">{view.effectivenessScore}%</span>
                   </div>
                   <div className="bg-accent/50 rounded-lg p-3 sm:col-span-2">
                     Test Cases Passed:{' '}
                     <span className="font-semibold">
-                      {result.testCasesPassed}/{result.totalTestCases}
+                      {view.testCasesPassed}/{view.totalTestCases}
                     </span>
-                    {typeof result.testPassRate === 'number' && (
+                    {typeof view.testPassRate === 'number' && (
                       <span className="block mt-1 text-muted-foreground">
-                        Code test pass rate: {result.testPassRate}% (reliability blends mostly test pass rate with a small prompt-quality term and is capped so failures dominate)
+                        Code test pass rate: {view.testPassRate}% (reliability = 82% tests + 18% predicted success from prompt quality)
                       </span>
                     )}
                   </div>
                 </div>
 
-                <div className="bg-accent/50 rounded-lg p-4 font-mono text-sm whitespace-pre-wrap max-h-64 overflow-y-auto">
-                  {result.generatedCode}
-                </div>
+                {view.testCaseResults && view.testCaseResults.length > 0 && (
+                  <details className="bg-accent/40 border border-border rounded-lg p-3">
+                    <summary className="cursor-pointer text-foreground font-medium text-sm">
+                      Test case details ({view.testCasesPassed}/{view.totalTestCases} passed)
+                    </summary>
+                    <ul className="mt-2 space-y-2 text-sm text-muted-foreground max-h-48 overflow-y-auto">
+                      {view.testCaseResults.map((tc, i) => (
+                        <li
+                          key={i}
+                          className={
+                            tc.passed
+                              ? 'text-green-600 dark:text-green-400'
+                              : 'text-red-600 dark:text-red-400'
+                          }
+                        >
+                          Input: {tc.input} → expected {tc.expectedOutput}, got{' '}
+                          {tc.actualOutput} ({tc.passed ? 'pass' : 'fail'})
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
 
-                {result.feedback && result.feedback.length > 0 && (
+                {view.feedback && view.feedback.length > 0 && view.suggestion && (
+                  <p className="text-sm text-muted-foreground">{view.suggestion}</p>
+                )}
+
+                {view.feedback && view.feedback.length > 0 && (
                   <div className="bg-violet-500/10 border border-violet-500/25 rounded-lg p-4">
                     <p className="text-sm font-semibold text-foreground mb-2">How to improve your prompt</p>
                     <ul className="list-disc list-inside space-y-1.5 text-sm text-muted-foreground">
-                      {result.feedback.map((line, i) => (
+                      {view.feedback.map((line, i) => (
                         <li key={i}>{line}</li>
                       ))}
                     </ul>
                   </div>
                 )}
 
-                <p className="text-sm text-muted-foreground">{result.suggestion}</p>
+                {view.generatedCode ? (
+                  <div className="rounded-lg border border-zinc-700 bg-zinc-950 overflow-hidden max-h-64">
+                    <pre className="p-4 font-mono text-sm text-green-400 whitespace-pre-wrap leading-relaxed overflow-auto max-h-64">
+                      {view.generatedCode}
+                    </pre>
+                  </div>
+                ) : null}
 
-                {(attempts >= 3 || lowScoreAttempts >= 2) && (
+                {(!view.feedback || view.feedback.length === 0) && view.suggestion && (
+                  <p className="text-sm text-muted-foreground">{view.suggestion}</p>
+                )}
+
+                {(attempts >= 3 || lowScoreAttempts >= 2) && !isAttemptCompleted && (
                   <div className="bg-violet-500/10 border border-violet-500/30 rounded-lg p-4 text-sm">
                     <p className="font-semibold text-foreground mb-2">Prompt Template Builder</p>
                     <p className="text-muted-foreground">Language: ___ | Input: ___ | Output: ___ | Constraints: ___</p>
@@ -330,17 +481,23 @@ setSelectedProblemId(level1Problems[0]?.problem_id || '');
             id="prompt"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            readOnly={isAttemptCompleted}
             placeholder="Write your prompt here... Be clear, specific, and provide context."
-            className="w-full h-40 bg-accent border border-border rounded-lg p-4 focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"
+            className="w-full h-40 bg-accent border border-border rounded-lg p-4 focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none disabled:opacity-80 read-only:opacity-90"
           />
 
-          <div className="flex items-center justify-between mt-4">
+          <div className="flex items-center justify-between mt-4 flex-wrap gap-3">
             <p className="text-sm text-muted-foreground">
               {prompt.length} characters
             </p>
             <button
               onClick={handleSubmit}
-              disabled={isLoading || !prompt.trim()}
+              disabled={
+                isLoading ||
+                isHistoryLoading ||
+                isAttemptCompleted ||
+                !prompt.trim()
+              }
               className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-purple-600 text-white px-6 py-3 rounded-lg font-medium hover:shadow-lg hover:shadow-violet-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
@@ -356,6 +513,11 @@ setSelectedProblemId(level1Problems[0]?.problem_id || '');
               )}
             </button>
           </div>
+          {isAttemptCompleted && (
+            <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
+              Attempt already completed — one submission per problem.
+            </p>
+          )}
         </div>
       </div>
     </div>
