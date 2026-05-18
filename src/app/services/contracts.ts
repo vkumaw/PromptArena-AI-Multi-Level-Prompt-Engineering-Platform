@@ -141,6 +141,8 @@ export interface Level3HistoryRecord {
   reasonQualityScore: number;
   believesHallucination: boolean | null;
   reliabilityScore: number;
+  outputQualityScore: number;
+  securityRating: number;
   userPrompt: string;
   aiResponseText: string;
   timestamp: string;
@@ -171,8 +173,6 @@ export interface Level3Response {
   outputQualityScore?: number;
   securityRating?: number;
   compositeScore?: number;
-  /** Same as compositeScore; kept for older UI expectations */
-  reliabilityAdjustment?: number;
   rationale: string;
   userPromptReceived?: string;
 }

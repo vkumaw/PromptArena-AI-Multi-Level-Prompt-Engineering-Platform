@@ -6,6 +6,7 @@ import {
   applyReflectionCompositeAdjustment,
 } from "../../shared/level3CodingAnalyze.js";
 import UserData from "../models/userData.js";
+import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -174,10 +175,10 @@ function buildCodingRationale({
 }
 
 /** GET saved Level 3 coding attempts for read-only review after 3/3 or on revisit. */
-router.get("/history", async (req, res) => {
+router.get("/history", verifyToken, async (req, res) => {
   try {
     const problemId = req.query.problemId;
-    const userId = (req.query.userId || "guest-user").toString();
+    const userId = req.user.userId.toString();
 
     if (!problemId) {
       return res.status(400).json({ error: "problemId is required" });
@@ -195,6 +196,8 @@ router.get("/history", async (req, res) => {
       reasonQualityScore: row.ethicalScore ?? 0,
       believesHallucination: row.hallucinationDetected ?? null,
       reliabilityScore: row.reliabilityScore ?? 0,
+      outputQualityScore: row.outputQualityScore ?? 0,
+securityRating: row.securityRating ?? 0,
       userPrompt: row.prompt ?? "",
       aiResponseText: row.generatedCode ?? "",
       timestamp: row.timestamp
@@ -213,7 +216,7 @@ router.get("/history", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", verifyToken, async (req, res) => {
   const { promptText, mode } = req.body;
 
   if (mode === "ethical") {
@@ -234,6 +237,30 @@ router.post("/", async (req, res) => {
       rationale =
         "Highly unethical response detected. Harmful or illegal intent is present.";
     }
+    const userId = req.user.userId.toString();
+const ethicalProblemId = `ethical-${req.body.scenarioId || "default"}`;
+
+const previousEthical = await UserData.find({
+  userId,
+  problemId: ethicalProblemId,
+  level: 3,
+});
+
+if (previousEthical.length >= 1) {
+  return res.status(400).json({
+    error: "Maximum 1 attempt reached for this ethical scenario.",
+  });
+}
+
+await UserData.create({
+  userId,
+  problemId: ethicalProblemId,
+  level: 3,
+  prompt: promptText || "",
+  effectivenessScore: ethicalIntegrityScore,
+  ethicalScore: ethicalIntegrityScore,
+  timestamp: new Date(),
+});
 
     return res.json({
       ethicalIntegrityScore,
@@ -252,7 +279,7 @@ router.post("/", async (req, res) => {
   } = req.body;
 
   const pid = problemId || scenarioId;
-  const userId = req.body.userId || "guest-user";
+  const userId = req.user.userId.toString();
 
   const previousAttempts = await UserData.find({
     userId,
@@ -260,9 +287,9 @@ router.post("/", async (req, res) => {
     level: 3,
   });
 
-  if (previousAttempts.length >= 3) {
+  if (previousAttempts.length >= 1) {
     return res.status(400).json({
-      error: "Maximum 3 attempts reached for this coding problem.",
+      error: "Maximum 1 attempts reached for this coding problem.",
     });
   }
 
@@ -323,6 +350,8 @@ router.post("/", async (req, res) => {
     generatedCode: aiResponseText,
     hallucinationDetected: userBelief,
     reliabilityScore: analysis.reliabilityScore,
+    outputQualityScore: analysis.outputQualityScore,
+securityRating: analysis.securityRating,
     effectivenessScore: adjustedComposite,
     ethicalScore: reasonScoring.reasonQualityScore,
     feedback: reasonScoring.matchedKeywords ?? [],
@@ -343,7 +372,6 @@ router.post("/", async (req, res) => {
     outputQualityScore: analysis.outputQualityScore,
     securityRating: analysis.securityRating,
     compositeScore: adjustedComposite,
-    reliabilityAdjustment: adjustedComposite,
     rationale,
     userPromptReceived: typeof userPrompt === "string" ? userPrompt : "",
     attempts,

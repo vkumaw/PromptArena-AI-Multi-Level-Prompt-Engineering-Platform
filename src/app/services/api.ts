@@ -26,12 +26,10 @@ import { level3CodingProblems } from '../../../shared/level3CodingProblems.js';
 import {
   analyzeAiResponseSnippet,
   scoreReasonExplanation,
-  applyReflectionCompositeAdjustment,
   type AiSnippetAnalysis,
   type ReasonExplanationScore,
 } from '../../../shared/level3CodingAnalyze.js';
 import type { Level3HistoryRecord } from './contracts';
-import { apiPath } from '../utils/apiBase';
 
 /** Minimal problem fields used by Level 3 mock scoring */
 interface Level3ProblemMeta {
@@ -54,9 +52,13 @@ function mockLevel3Key(userId: string, problemId: string) {
 /** Same URL rules as Level 1/2: apiPath when base is set, else Vite proxy `/api/*`. */
 function resolveHttpApiUrl(path: string): string {
   const p = path.startsWith('/') ? path : `/${path}`;
-  if ((import.meta.env.VITE_API_BASE_URL || '').trim()) {
-    return apiPath(p);
+
+  const base = (import.meta.env.VITE_API_BASE_URL || '').trim();
+
+  if (base) {
+    return `${base}${p}`;
   }
+
   return `/api${p}`;
 }
 
@@ -64,7 +66,20 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+function applyReflectionCompositeAdjustment(
+  baseComposite: number,
+  userHallucinationAnswerCorrect: boolean | null
+): number {
+  let score = baseComposite;
 
+  if (userHallucinationAnswerCorrect === true) {
+    score += 20;
+  } else if (userHallucinationAnswerCorrect === false) {
+    score -= 25;
+  }
+
+  return clamp(Math.round(score), 0, 100);
+}
 const buildGeneratedCode = (problemId: string) => {
   if (problemId === '1') {
     return `def respond_to_customer_complaint(message: str) -> str:
@@ -232,6 +247,7 @@ const mockApi: ApiClient = {
           : null,
     };
   },
+  
 
   async submitLevel3Scenario(payload: Level3Request): Promise<Level3Response> {
     await wait(700);
@@ -293,8 +309,8 @@ const mockApi: ApiClient = {
     const uid = payload.userId || 'guest-user';
     const key = mockLevel3Key(uid, pid);
     const prior = mockLevel3Attempts.get(key) ?? [];
-    if (prior.length >= 3) {
-      throw new Error('Maximum 3 attempts reached for this coding problem.');
+    if (prior.length >= 1) {
+      throw new Error('Maximum 1 attempts reached for this coding problem.');
     }
 
     const adjustedComposite = applyReflectionCompositeAdjustment(
@@ -320,6 +336,8 @@ const mockApi: ApiClient = {
       reasonQualityScore: reasonScoring.reasonQualityScore,
       believesHallucination: userBelief,
       reliabilityScore: analysis.reliabilityScore,
+      outputQualityScore: analysis.outputQualityScore,
+securityRating: analysis.securityRating,
       userPrompt: payload.userPrompt ?? '',
       aiResponseText: snippet,
       timestamp: new Date().toISOString(),
@@ -341,7 +359,6 @@ const mockApi: ApiClient = {
       outputQualityScore: analysis.outputQualityScore,
       securityRating: analysis.securityRating,
       compositeScore: adjustedComposite,
-      reliabilityAdjustment: adjustedComposite,
       rationale,
       userPromptReceived: payload.userPrompt ?? '',
       attempts,
@@ -379,6 +396,42 @@ export function getMockLevel3History(
   return { attempts: records.length, records };
 }
 
+export async function fetchLevel3History(
+  problemId: string,
+  token: string
+): Promise<{
+  attempts: number;
+  records: Level3HistoryRecord[];
+}> {
+  const response = await fetch(
+    resolveHttpApiUrl(`/level3/history?problemId=${problemId}`),
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    let message = `Failed to load Level 3 history (${response.status})`;
+
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) {
+        message = body.error;
+      }
+    } catch {
+      // ignore json parse failure
+    }
+
+    throw new Error(message);
+  }
+
+  return (await response.json()) as {
+    attempts: number;
+    records: Level3HistoryRecord[];
+  };
+}
 const postJson = async <TResponse>(
   path: string,
   payload: unknown
@@ -387,7 +440,14 @@ const postJson = async <TResponse>(
   try {
     response = await fetch(resolveHttpApiUrl(path), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+  'Content-Type': 'application/json',
+  ...(localStorage.getItem('token')
+    ? {
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+      }
+    : {}),
+},
       body: JSON.stringify(payload),
     });
   } catch {

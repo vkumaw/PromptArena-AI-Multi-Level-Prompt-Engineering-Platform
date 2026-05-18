@@ -1,4 +1,3 @@
-// Authentication utilities using localStorage
 export interface User {
   id: string;
   email: string;
@@ -6,39 +5,79 @@ export interface User {
   score: number;
 }
 
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const payload = token.split('.')[1];
+    const decoded = atob(payload);
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
 export const authService = {
   login: (email: string, password: string): User | null => {
-    // Mock authentication - in real app, this would call an API
     if (email && password) {
       const user: User = {
-        id: '1',
+        id: crypto.randomUUID(),
         email,
         username: email.split('@')[0],
         score: 1250,
       };
+
       localStorage.setItem('user', JSON.stringify(user));
       return user;
     }
+
     return null;
   },
 
   logout: () => {
     localStorage.removeItem('user');
+    localStorage.removeItem('token');
+  },
+
+  getUserIdFromToken: (): string | null => {
+    const token = localStorage.getItem('token');
+
+    if (!token) return null;
+
+    const payload = decodeJwtPayload(token);
+
+    return payload?.userId ?? null;
   },
 
   getCurrentUser: (): User | null => {
+    const tokenUserId = authService.getUserIdFromToken();
+
     const userStr = localStorage.getItem('user');
+
     if (userStr) {
       try {
-        return JSON.parse(userStr);
+        const parsed = JSON.parse(userStr);
+
+        return {
+          ...parsed,
+          id: tokenUserId || parsed.id,
+        };
       } catch {
         return null;
       }
     }
+
+    if (tokenUserId) {
+      return {
+        id: tokenUserId,
+        email: '',
+        username: 'user',
+        score: 0,
+      };
+    }
+
     return null;
   },
 
   isAuthenticated: (): boolean => {
-    return !!authService.getCurrentUser();
+    return !!localStorage.getItem('token');
   },
 };
