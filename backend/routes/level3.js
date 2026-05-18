@@ -3,7 +3,9 @@ import { level3CodingProblems } from "../../shared/level3CodingProblems.js";
 import {
   analyzeAiResponseSnippet,
   scoreReasonExplanation,
+  applyReflectionCompositeAdjustment,
 } from "../../shared/level3CodingAnalyze.js";
+import UserData from "../models/userData.js";
 
 const router = express.Router();
 
@@ -132,7 +134,9 @@ function buildCodingRationale({
 
   lines.push(
     `Ground truth (this exercise): ${
-      gt ? "the canonical snippet counts as hallucinating / unreliable." : "the canonical snippet is not treated as a hallucination."
+      gt
+        ? "the canonical snippet counts as hallucinating / unreliable."
+        : "the canonical snippet is not treated as a hallucination."
     }`
   );
 
@@ -169,7 +173,47 @@ function buildCodingRationale({
   return lines.join(" ");
 }
 
-router.post("/", (req, res) => {
+/** GET saved Level 3 coding attempts for read-only review after 3/3 or on revisit. */
+router.get("/history", async (req, res) => {
+  try {
+    const problemId = req.query.problemId;
+    const userId = (req.query.userId || "guest-user").toString();
+
+    if (!problemId) {
+      return res.status(400).json({ error: "problemId is required" });
+    }
+
+    const rows = await UserData.find({
+      userId,
+      problemId,
+      level: 3,
+    }).sort({ timestamp: 1 });
+
+    const records = rows.map((row, index) => ({
+      attempt: index + 1,
+      compositeScore: row.effectivenessScore ?? 0,
+      reasonQualityScore: row.ethicalScore ?? 0,
+      believesHallucination: row.hallucinationDetected ?? null,
+      reliabilityScore: row.reliabilityScore ?? 0,
+      userPrompt: row.prompt ?? "",
+      aiResponseText: row.generatedCode ?? "",
+      timestamp: row.timestamp
+        ? new Date(row.timestamp).toISOString()
+        : new Date().toISOString(),
+      matchedKeywords: Array.isArray(row.feedback) ? row.feedback : [],
+    }));
+
+    return res.json({
+      attempts: records.length,
+      records,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Failed to load Level 3 history" });
+  }
+});
+
+router.post("/", async (req, res) => {
   const { promptText, mode } = req.body;
 
   if (mode === "ethical") {
@@ -208,6 +252,20 @@ router.post("/", (req, res) => {
   } = req.body;
 
   const pid = problemId || scenarioId;
+  const userId = req.body.userId || "guest-user";
+
+  const previousAttempts = await UserData.find({
+    userId,
+    problemId: pid,
+    level: 3,
+  });
+
+  if (previousAttempts.length >= 3) {
+    return res.status(400).json({
+      error: "Maximum 3 attempts reached for this coding problem.",
+    });
+  }
+
   const problem = level3CodingProblems.find((p) => p.problemId === pid);
 
   if (!problem) {
@@ -241,6 +299,11 @@ router.post("/", (req, res) => {
   const userHallucinationAnswerCorrect =
     userBelief === null ? null : userBelief === gt;
 
+  const adjustedComposite = applyReflectionCompositeAdjustment(
+    analysis.compositeScore,
+    userHallucinationAnswerCorrect
+  );
+
   const rationale = buildCodingRationale({
     problem,
     analysis,
@@ -248,6 +311,22 @@ router.post("/", (req, res) => {
     userBelief,
     userCorrect: userHallucinationAnswerCorrect,
     reasonScoring,
+  });
+
+  const attempts = previousAttempts.length + 1;
+
+  await UserData.create({
+    userId,
+    problemId: pid,
+    level: 3,
+    prompt: typeof userPrompt === "string" ? userPrompt : "",
+    generatedCode: aiResponseText,
+    hallucinationDetected: userBelief,
+    reliabilityScore: analysis.reliabilityScore,
+    effectivenessScore: adjustedComposite,
+    ethicalScore: reasonScoring.reasonQualityScore,
+    feedback: reasonScoring.matchedKeywords ?? [],
+    timestamp: new Date(),
   });
 
   return res.json({
@@ -263,10 +342,11 @@ router.post("/", (req, res) => {
     reliabilityScore: analysis.reliabilityScore,
     outputQualityScore: analysis.outputQualityScore,
     securityRating: analysis.securityRating,
-    compositeScore: analysis.compositeScore,
-    reliabilityAdjustment: analysis.compositeScore,
+    compositeScore: adjustedComposite,
+    reliabilityAdjustment: adjustedComposite,
     rationale,
     userPromptReceived: typeof userPrompt === "string" ? userPrompt : "",
+    attempts,
   });
 });
 

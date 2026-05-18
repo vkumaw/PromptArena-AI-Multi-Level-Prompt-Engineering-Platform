@@ -128,3 +128,14 @@ export function scoreReasonExplanation(reasonExplanation, problemMeta = {}) {
     hitAntiPatterns,
   };
 }
+
+/** Adjust composite based on Yes/No reflection vs exercise ground truth. */
+export function applyReflectionCompositeAdjustment(
+  baseComposite,
+  userHallucinationAnswerCorrect
+) {
+  let score = baseComposite;
+  if (userHallucinationAnswerCorrect === true) score += 20;
+  else if (userHallucinationAnswerCorrect === false) score -= 25;
+  return clamp(Math.round(score), 0, 100);
+}

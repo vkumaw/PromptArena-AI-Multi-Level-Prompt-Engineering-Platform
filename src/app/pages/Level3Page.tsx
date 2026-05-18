@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Navbar } from '../components/Navbar';
 import {
   ShieldCheck,
@@ -7,14 +7,19 @@ import {
   XCircle,
 } from 'lucide-react';
 
-import { apiClient } from '../services/api';
+import { apiClient, getMockLevel3History } from '../services/api';
 import { authService } from '../utils/auth';
 import type {
   Level3CodingProblem,
+  Level3HistoryRecord,
+  Level3HistoryResponse,
   Level3Response,
 } from '../services/contracts';
 import { setLevelCompleted } from '../utils/progress';
 import { level3CodingProblemsTyped } from '../data/level3CodingProblems';
+import { apiPath } from '../utils/apiBase';
+
+const API_MODE = (import.meta.env.VITE_API_MODE || 'mock').toLowerCase();
 
 export function Level3Page() {
   const [mode, setMode] = useState<'ethical' | 'coding'>('ethical');
@@ -23,6 +28,10 @@ export function Level3Page() {
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [attemptMap, setAttemptMap] = useState<Record<string, number>>({});
+  const [historyRecords, setHistoryRecords] = useState<Level3HistoryRecord[]>(
+    []
+  );
 
   const ethicalScenarios = [
     {
@@ -67,6 +76,9 @@ export function Level3Page() {
     codingProblems.find((p) => p.problemId === selectedCodingId) ??
     codingProblems[0];
 
+  const currentAttempts = attemptMap[selectedCodingId] ?? 0;
+  const maxAttemptsReached = currentAttempts >= 3;
+
   const [ethicalResponse, setEthicalResponse] = useState('');
 
   const [userPrompt, setUserPrompt] = useState(
@@ -80,6 +92,39 @@ export function Level3Page() {
   >('');
   const [reasonExplanation, setReasonExplanation] = useState('');
 
+  const loadHistoryForProblem = useCallback(async (problemId: string) => {
+    if (!problemId) return false;
+    const currentUser = authService.getCurrentUser();
+    const uid = currentUser?.id || 'guest-user';
+
+    try {
+      let data: Level3HistoryResponse;
+      if (API_MODE === 'http') {
+        const res = await fetch(
+          apiPath(
+            `/level3/history?userId=${encodeURIComponent(uid)}&problemId=${encodeURIComponent(problemId)}`
+          )
+        );
+        const json = (await res.json()) as Level3HistoryResponse & {
+          error?: string;
+        };
+        if (!res.ok) return false;
+        data = json;
+      } else {
+        data = getMockLevel3History(uid, problemId);
+      }
+
+      setHistoryRecords(data.records || []);
+      setAttemptMap((prev) => ({
+        ...prev,
+        [problemId]: data.attempts || 0,
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
     if (mode !== 'coding' || !selectedCoding) return;
     setUserPrompt(selectedCoding.sampleUserPrompt);
@@ -87,7 +132,8 @@ export function Level3Page() {
     setBelievesHallucination('');
     setReasonExplanation('');
     setAnalysisResult(null);
-  }, [mode, selectedCoding.problemId]);
+    void loadHistoryForProblem(selectedCoding.problemId);
+  }, [mode, selectedCoding.problemId, loadHistoryForProblem]);
 
   const handleSubmitCoding = async () => {
     if (!aiResponseText.trim()) {
@@ -102,6 +148,11 @@ export function Level3Page() {
       setError(
         'Add a short explanation (why) — at least a sentence or two.'
       );
+      return;
+    }
+    if (currentAttempts >= 3) {
+      await loadHistoryForProblem(selectedCoding.problemId);
+      setError('');
       return;
     }
 
@@ -120,6 +171,13 @@ export function Level3Page() {
         reasonExplanation,
       });
       setAnalysisResult(response);
+      if (response.attempts != null) {
+        setAttemptMap((prev) => ({
+          ...prev,
+          [selectedCoding.problemId]: response.attempts!,
+        }));
+      }
+      await loadHistoryForProblem(selectedCoding.problemId);
 
       const composite = response.compositeScore ?? 0;
       const passedReflection =
@@ -129,11 +187,21 @@ export function Level3Page() {
         setLevelCompleted(3);
       }
     } catch (submitError) {
-      setError(
+      const message =
         submitError instanceof Error
           ? submitError.message
-          : 'Unable to evaluate right now.'
-      );
+          : 'Unable to evaluate right now.';
+      if (message.toLowerCase().includes('maximum 3 attempts')) {
+        setAttemptMap((prev) => ({
+          ...prev,
+          [selectedCoding.problemId]: 3,
+        }));
+        await loadHistoryForProblem(selectedCoding.problemId);
+        setAnalysisResult(null);
+        setError('');
+        return;
+      }
+      setError(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -201,6 +269,13 @@ export function Level3Page() {
               ? 'Submit a safety-focused response for the ethical challenge.'
               : 'Pick a scenario, paste the user prompt and AI output, then reflect on hallucinations.'}
           </p>
+
+          {mode === 'coding' && currentAttempts > 0 && (
+            <p className="text-sm text-muted-foreground mb-4">
+              Attempt {Math.min(currentAttempts, 3)} of 3
+              {maxAttemptsReached ? ' — limit reached' : ''}
+            </p>
+          )}
 
           <div className="mb-6">
             <label className="block text-sm font-medium text-foreground mb-2">
@@ -314,6 +389,7 @@ export function Level3Page() {
                     Step 1 — User prompt (what was asked of the AI)
                   </p>
                   <textarea
+                    disabled={maxAttemptsReached}
                     value={userPrompt}
                     onChange={(e) => setUserPrompt(e.target.value)}
                     className="w-full min-h-[120px] bg-accent border border-border rounded-lg p-4 text-sm"
@@ -324,6 +400,7 @@ export function Level3Page() {
                     Step 2 — AI response (code or text to analyze)
                   </p>
                   <textarea
+                    disabled={maxAttemptsReached}
                     value={aiResponseText}
                     onChange={(e) => setAiResponseText(e.target.value)}
                     className="w-full min-h-[160px] bg-accent border border-border rounded-lg p-4 font-mono text-sm"
@@ -340,6 +417,7 @@ export function Level3Page() {
                   </span>
                   <label className="inline-flex items-center gap-2 cursor-pointer">
                     <input
+                      disabled={maxAttemptsReached}
                       type="radio"
                       name="hall"
                       checked={believesHallucination === 'yes'}
@@ -349,6 +427,7 @@ export function Level3Page() {
                   </label>
                   <label className="inline-flex items-center gap-2 cursor-pointer">
                     <input
+                      disabled={maxAttemptsReached}
                       type="radio"
                       name="hall"
                       checked={believesHallucination === 'no'}
@@ -362,21 +441,55 @@ export function Level3Page() {
                     Why? (cite imports, logic, security, or missing validation.)
                   </p>
                   <textarea
+                    disabled={maxAttemptsReached}
                     value={reasonExplanation}
                     onChange={(e) => setReasonExplanation(e.target.value)}
                     placeholder="Explain your reasoning..."
                     className="w-full min-h-[100px] bg-accent border border-border rounded-lg p-4 text-sm"
                   />
                 </div>
+                {maxAttemptsReached && (
+                  <p className="text-sm text-muted-foreground">
+                    Maximum 3 attempts reached for this problem. Your past
+                    submissions stay visible below for review.
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={() => void handleSubmitCoding()}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || maxAttemptsReached}
                   className="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-5 py-2 rounded-lg disabled:opacity-50"
                 >
                   {isSubmitting ? 'Evaluating...' : 'Evaluate'}
                 </button>
               </div>
+
+              {historyRecords.length > 0 && (
+                <div className="space-y-3 rounded-xl border border-violet-500/30 bg-violet-500/5 p-4">
+                  <p className="text-sm font-semibold text-foreground">
+                    All attempts (read-only)
+                  </p>
+                  {historyRecords.map((rec) => (
+                    <div
+                      key={rec.attempt}
+                      className="rounded-lg border border-border bg-card p-3 text-sm space-y-1"
+                    >
+                      <p className="font-medium">
+                        Attempt {rec.attempt} — Composite {rec.compositeScore}%
+                      </p>
+                      <p className="text-muted-foreground">
+                        Explanation: {rec.reasonQualityScore}/100 · Hallucination
+                        belief:{' '}
+                        {rec.believesHallucination === null
+                          ? '—'
+                          : rec.believesHallucination
+                            ? 'Yes'
+                            : 'No'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -433,6 +546,13 @@ export function Level3Page() {
                   <p className="text-xl font-semibold">
                     {analysisResult.compositeScore ?? '—'}%
                   </p>
+                  {analysisResult.userHallucinationAnswerCorrect !== null &&
+                    analysisResult.userHallucinationAnswerCorrect !==
+                      undefined && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Includes reflection adjustment for your Yes/No answer
+                      </p>
+                    )}
                 </div>
               </div>
 
