@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navbar } from '../components/Navbar';
 import { RefreshCw, Sparkles } from 'lucide-react';
-import { authService } from '../utils/auth';
 import type {
   CodingProblem,
   Level2EvolutionEntry,
@@ -95,13 +94,18 @@ export function Level2Page() {
 
   const loadHistoryForProblem = useCallback(async (problemId: string) => {
     if (!problemId) return false;
-    const currentUser = authService.getCurrentUser();
-    const uid = currentUser?.id || 'guest-user';
+    const token = localStorage.getItem('token');
+    if (!token) return false;
     try {
       const res = await fetch(
         apiPath(
-          `/level2/history?userId=${encodeURIComponent(uid)}&problemId=${encodeURIComponent(problemId)}`
-        )
+          `/level2/history?problemId=${encodeURIComponent(problemId)}`
+        ),
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
       );
       const data = (await res.json()) as Level2HistoryApiResponse & {
         error?: string;
@@ -145,15 +149,18 @@ export function Level2Page() {
     setError('');
 
     try {
-      const currentUser = authService.getCurrentUser();
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Please login again to continue.');
+      }
 
       const res = await fetch(apiPath('/level2'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          userId: currentUser?.id || 'guest-user',
           prompt: customPrompt,
           problem: selectedProblem,
         }),

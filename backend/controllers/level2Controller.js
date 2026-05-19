@@ -3,6 +3,13 @@ import { stripMarkdownCode } from "../services/testRunner.js";
 import { buildLevel2ImprovementFeedback } from "../utils/level2ImprovementFeedback.js";
 import UserData from "../models/userData.js";
 
+/** JWT userId as a consistent string for MongoDB queries (never trust body userId). */
+function authUserIdFromRequest(req) {
+  const raw = req.user?.userId;
+  if (raw == null || raw === "") return null;
+  return String(raw).trim();
+}
+
 function testPassPercent(record) {
   if (!record || !record.totalTestCases || record.totalTestCases <= 0)
     return undefined;
@@ -15,10 +22,13 @@ function testPassPercent(record) {
 export const getLevel2History = async (req, res) => {
   try {
     const problemId = req.query.problemId;
-    const uid = (req.query.userId || "guest-user").toString();
+    const uid = authUserIdFromRequest(req);
 
     if (!problemId) {
       return res.status(400).json({ error: "problemId is required" });
+    }
+    if (!uid) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
     const rows = await UserData.find({ userId: uid, problemId }).sort({
@@ -182,14 +192,20 @@ IMPORTANT:
 
 export const handleLevel2 = async (req, res) => {
   try {
-    const { userId, prompt, problem } = req.body;
+    const { prompt, problem } = req.body;
 
     if (!prompt || !problem) {
       return res.status(400).json({ error: "Missing input" });
     }
 
+    const uid = authUserIdFromRequest(req);
+    if (!uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    console.log("[level2] saving attempt for userId:", uid);
+
     const problemId = problem?.problem_id ?? problem?.id;
-    const uid = userId || "guest-user";
 
     const previousAttempts = await UserData.find({
       userId: uid,

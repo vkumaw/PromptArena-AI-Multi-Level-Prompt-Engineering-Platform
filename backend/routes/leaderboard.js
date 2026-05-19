@@ -1,22 +1,10 @@
 import express from "express";
-import UserData from "../models/userData.js"; // ✅ MongoDB model
+import { getLeaderboard } from "../controllers/leaderboardController.js";
 
 const router = express.Router();
 
-router.get("/", async (req, res) => {
-  try {
-    const data = await UserData.find();
+console.log("[leaderboard] route module loaded — aggregated rankings v2");
 
-    // sort by effectiveness score (highest first)
-    const sorted = data.sort(
-      (a, b) => (b.effectivenessScore || 0) - (a.effectivenessScore || 0)
-    );
-
-    res.json(sorted);
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get("/", getLeaderboard);
 
 export default router;

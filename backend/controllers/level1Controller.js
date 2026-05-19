@@ -57,8 +57,15 @@ export function mapUserDataToLevel1Response(doc) {
   };
 }
 
+function authUserIdString(raw) {
+  if (raw == null || raw === "") return null;
+  return String(raw).trim();
+}
+
 async function findLevel1Attempt(userId, problemId) {
-  return UserData.findOne({ userId, problemId, level: LEVEL1_TAG }).sort({
+  const uid = authUserIdString(userId);
+  if (!uid) return null;
+  return UserData.findOne({ userId: uid, problemId, level: LEVEL1_TAG }).sort({
     timestamp: -1,
   });
 }
@@ -67,7 +74,7 @@ async function findLevel1Attempt(userId, problemId) {
 export const getLevel1History = async (req, res) => {
   try {
     const problemId = req.query.problemId;
-    const userId = req.user?.userId;
+    const userId = authUserIdString(req.user?.userId);
 
     if (!problemId) {
       return res.status(400).json({ error: "problemId is required" });
@@ -95,7 +102,10 @@ export const getLevel1History = async (req, res) => {
 export const handleLevel1 = async (req, res) => {
   try {
     const { prompt, problem } = req.body;
-    const userId = req.user.userId;
+    const userId = authUserIdString(req.user.userId);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     if (!prompt) {
       return res.status(400).json({ error: "Missing prompt" });

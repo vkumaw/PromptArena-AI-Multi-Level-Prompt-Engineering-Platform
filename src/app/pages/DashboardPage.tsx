@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { Navbar } from '../components/Navbar';
 import { Trophy, Zap, Target, TrendingUp } from 'lucide-react';
 import { authService } from '../utils/auth';
+
+function normalizeLeaderboardUserId(id: string | undefined): string {
+  if (!id) return '';
+  return String(id).trim();
+}
 import { apiClient } from '../services/api';
 import type { LeaderboardEntry } from '../services/contracts';
 import { getProgress } from '../utils/progress';
@@ -37,6 +42,9 @@ const levels = [
 export function DashboardPage() {
   const navigate = useNavigate();
   const currentUser = authService.getCurrentUser();
+  const currentUserId = normalizeLeaderboardUserId(
+    authService.getUserIdFromToken() ?? currentUser?.id
+  );
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardError, setLeaderboardError] = useState('');
   const [progress, setProgress] = useState(getProgress());
@@ -44,9 +52,11 @@ export function DashboardPage() {
   useEffect(() => {
     const loadLeaderboard = async () => {
       try {
+        setLeaderboardError('');
         const data = await apiClient.fetchLeaderboard();
         setLeaderboard(data);
       } catch (loadError) {
+        setLeaderboard([]);
         setLeaderboardError(
           loadError instanceof Error
             ? loadError.message
@@ -56,6 +66,12 @@ export function DashboardPage() {
     };
     void loadLeaderboard();
     setProgress(getProgress());
+
+    const onFocus = () => {
+      void loadLeaderboard();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
   const levelStatusText = (levelId: number) => {
@@ -169,11 +185,13 @@ export function DashboardPage() {
                 {leaderboard.map((user, index) => {
                   const isTop3 = user.rank <= 3;
                   const isCurrentUser =
-                    currentUser?.username === user.username;
+                    !!currentUserId &&
+                    !!user.userId &&
+                    currentUserId === normalizeLeaderboardUserId(user.userId);
 
                   return (
                     <tr
-                      key={`${index}-${user.username || 'user'}`}
+                      key={user.userId || `${user.rank}-${user.username}`}
                       className={`border-b border-border/50 transition-colors ${
                         isCurrentUser
                           ? 'bg-violet-500/10'

@@ -11,7 +11,6 @@ import {
   type Level3Response,
   type PromptVersion,
 } from './contracts';
-import { mockLeaderboard } from '../utils/mockData';
 import { problems20 } from '../data/problems';
 import { generateFeedback, trackPromptEvolution } from '../utils';
 import { evaluatePrompt } from '../utils/scoring.js';
@@ -30,6 +29,7 @@ import {
   type ReasonExplanationScore,
 } from '../../../shared/level3CodingAnalyze.js';
 import type { Level3HistoryRecord } from './contracts';
+import { parseLeaderboardPayload } from '../utils/parseLeaderboard';
 
 /** Minimal problem fields used by Level 3 mock scoring */
 interface Level3ProblemMeta {
@@ -366,8 +366,7 @@ securityRating: analysis.securityRating,
   },
 
   async fetchLeaderboard(): Promise<LeaderboardEntry[]> {
-    await wait(300);
-    return mockLeaderboard.map((entry) => ({ ...entry }));
+    return httpApi.fetchLeaderboard();
   },
 
   async fetchAnalytics(_userId: string): Promise<AnalyticsResponse> {
@@ -493,7 +492,8 @@ const httpApi: ApiClient = {
     if (!response.ok) {
       throw new Error(`API request failed: ${response.status}`);
     }
-    return (await response.json()) as LeaderboardEntry[];
+    const data = (await response.json()) as unknown;
+    return parseLeaderboardPayload(data);
   },
   async fetchAnalytics(userId: string) {
     const q = new URLSearchParams({ userId });

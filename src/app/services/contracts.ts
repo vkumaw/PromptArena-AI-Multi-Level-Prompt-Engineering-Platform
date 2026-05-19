@@ -180,6 +180,19 @@ export interface LeaderboardEntry {
   rank: number;
   username: string;
   score: number;
+  userId?: string;
+  percentile?: number;
+  overallScore?: number;
+  avgLevel1Score?: number | null;
+  avgLevel2Score?: number | null;
+  avgLevel3Score?: number | null;
+  totalProblemsSolved?: number;
+  totalAttempts?: number;
+  avgReliability?: number;
+  avgEffectiveness?: number;
+  avgEfficiency?: number;
+  hallucinationAccuracy?: number | null;
+  ethicalScoreAverage?: number | null;
 }
 
 export interface AnalyticsPoint {
