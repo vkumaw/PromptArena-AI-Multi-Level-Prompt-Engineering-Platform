@@ -54,10 +54,13 @@ router.get("/", async (req, res) => {
     }));
 
     const promptQualityValues = rows.flatMap((r) =>
-      [r.promptScore, r.structureScore, r.effectivenessScore].filter(
-        (n) => typeof n === "number"
-      )
-    );
+  [
+    r.promptScore,
+    typeof r.structureScore === "number"
+      ? r.structureScore * 10
+      : null,
+  ].filter((n) => typeof n === "number")
+);
 
     const reliabilityScores = rows
       .map((r) => r.reliabilityScore)

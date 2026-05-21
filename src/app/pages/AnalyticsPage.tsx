@@ -58,7 +58,9 @@ export function AnalyticsPage() {
   const averageScore = analytics?.averageScore ?? 0;
   const improvement = analytics?.improvement ?? 0;
   const improvementLabel =
-    improvement > 0 ? `+${improvement}` : `${improvement}`;
+  improvement > 0
+    ? `+${improvement} pts`
+    : `${improvement} pts`;
 
   const scoreHistory = analytics?.scoreHistory ?? [];
   const categoryBreakdown = analytics?.categoryBreakdown ?? [
@@ -164,16 +166,16 @@ export function AnalyticsPage() {
                 <TrendingUp className="size-5 text-orange-500" />
               </div>
               <span className="text-sm text-muted-foreground">
-                vs Last Month
+                Since First Attempt
               </span>
             </div>
 
             <div className="text-4xl font-bold mb-1">
-              {improvementLabel}%
+              {improvementLabel}
             </div>
 
             <div className="text-sm text-muted-foreground">
-              Improvement
+               Score Change
             </div>
           </div>
         </div>
@@ -185,6 +187,9 @@ export function AnalyticsPage() {
             <h2 className="text-xl font-semibold mb-6">
               Score Over Time
             </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+  Displays effectiveness scores from Level 1, Level 2, and Level 3 submissions over time.
+</p>
 
             <ResponsiveContainer width="100%" height={300}>
               <LineChart
@@ -288,7 +293,7 @@ export function AnalyticsPage() {
         {/* Skill Assessment */}
         <div className="bg-card border border-border rounded-xl p-6 text-card-foreground">
           <h2 className="text-xl font-semibold mb-6">
-            Skill Assessment
+            Performance Overview
           </h2>
 
           <ResponsiveContainer width="100%" height={400}>
@@ -325,6 +330,55 @@ export function AnalyticsPage() {
             </RadarChart>
           </ResponsiveContainer>
         </div>
+        <div className="bg-card border border-border rounded-xl p-6 text-card-foreground mt-8">
+  <h2 className="text-xl font-semibold mb-4">
+    Metrics Explanation
+  </h2>
+
+  <div className="space-y-4 text-sm text-muted-foreground leading-7">
+
+    <div>
+      <span className="font-semibold text-white">
+        Prompt Quality:
+      </span>{" "}
+      Calculated using prompt structure score and prompt score
+      generated during Level 1 and Level 2 evaluations.
+    </div>
+
+    <div>
+      <span className="font-semibold text-white">
+        Reliability Score:
+      </span>{" "}
+      Based on test case execution results, generated code
+      consistency, and prediction success analysis.
+    </div>
+
+    <div>
+      <span className="font-semibold text-white">
+        Ethics Score:
+      </span>{" "}
+      Generated during Level 3 ethical evaluation using
+      keyword-based safety and responsible AI analysis.
+    </div>
+
+    <div>
+      <span className="font-semibold text-white">
+        Score Over Time:
+      </span>{" "}
+      Displays how user performance changes across prompt
+      submissions and evaluations over time.
+    </div>
+
+    <div>
+      <span className="font-semibold text-white">
+        Performance Overview:
+      </span>{" "}
+      Radar visualization comparing Prompt Quality,
+      Reliability, and Ethics scores on a 0–100 scale.
+    </div>
+
+  </div>
+</div>
       </div>
     </div>
   );
