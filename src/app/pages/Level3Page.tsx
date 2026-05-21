@@ -525,14 +525,7 @@ export function Level3Page() {
                     {analysisResult.reliabilityScore ?? '—'}%
                   </p>
                 </div>
-                <div className="bg-accent border border-border rounded-lg p-4">
-                  <p className="text-xs text-muted-foreground">
-                    Output quality
-                  </p>
-                  <p className="text-xl font-semibold">
-                    {analysisResult.outputQualityScore ?? '—'}%
-                  </p>
-                </div>
+                
                 <div className="bg-accent border border-border rounded-lg p-4">
                   <p className="text-xs text-muted-foreground">
                     Security rating
@@ -542,7 +535,7 @@ export function Level3Page() {
                   </p>
                 </div>
                 <div className="bg-accent border border-border rounded-lg p-4">
-                  <p className="text-xs text-muted-foreground">Composite</p>
+                  <p className="text-xs text-muted-foreground">Final AI Reliability Score</p>
                   <p className="text-xl font-semibold">
                     {analysisResult.compositeScore ?? '—'}%
                   </p>
@@ -550,7 +543,7 @@ export function Level3Page() {
                     analysisResult.userHallucinationAnswerCorrect !==
                       undefined && (
                       <p className="text-xs text-muted-foreground mt-1">
-                        Includes reflection adjustment for your Yes/No answer
+                        Adjusted using your hallucination detection answer
                       </p>
                     )}
                 </div>
@@ -559,14 +552,14 @@ export function Level3Page() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-accent border border-border rounded-lg p-4 space-y-2">
                   <p className="font-medium flex items-center gap-2">
-                    Intrinsic scan (AI output)
+                    AI Output Analysis
                     {analysisResult.intrinsicHallucination ? (
                       <span className="text-amber-600 text-sm">
-                        Issues flagged
+                        Possible hallucination indicators detected
                       </span>
                     ) : (
                       <span className="text-emerald-600 text-sm">
-                        No strong signals
+                        No hallucination indicators detected
                       </span>
                     )}
                   </p>
@@ -576,21 +569,23 @@ export function Level3Page() {
                   </p>
                 </div>
                 <div className="bg-accent border border-border rounded-lg p-4 space-y-2">
-                  <p className="font-medium">Exercise ground truth</p>
+                  <p className="font-medium">Expected Answer</p>
                   <p className="text-sm">
-                    Labeled hallucination:{' '}
+                    Correct Detection:{' '}
                     <strong>
-                      {analysisResult.groundTruthHallucination ? 'Yes' : 'No'}
+                      {analysisResult.groundTruthHallucination
+  ? 'Hallucination Present'
+  : 'No Hallucination'}
                     </strong>
                   </p>
                 </div>
               </div>
 
               <div className="bg-accent border border-border rounded-lg p-4 space-y-3">
-                <p className="font-medium">Your reflection</p>
+                <p className="font-medium">Your Analysis</p>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="text-muted-foreground">
-                    Yes/No vs answer key:
+                    Detection Accuracy:
                   </span>
                   {analysisResult.userHallucinationAnswerCorrect === null ? (
                     <span className="text-muted-foreground">—</span>
@@ -606,7 +601,7 @@ export function Level3Page() {
                 </div>
                 <div className="text-sm">
                   <span className="text-muted-foreground">
-                    Explanation quality ({analysisResult.reasonQualityLabel ?? '—'}
+                    Reasoning Score ({analysisResult.reasonQualityLabel ?? '—'}
                     ):{' '}
                   </span>
                   <strong>{analysisResult.reasonQualityScore ?? 0}/100</strong>
@@ -628,8 +623,11 @@ export function Level3Page() {
               </div>
 
               <p className="text-muted-foreground text-sm leading-relaxed">
-                {analysisResult.rationale}
-              </p>
+  The AI-generated output was analyzed for hallucination patterns,
+  unsafe code practices, and reliability issues. Your response was
+  compared with the expected detection result and evaluated based on
+  explanation quality and keyword relevance.
+</p>
             </div>
           )}
         </div>

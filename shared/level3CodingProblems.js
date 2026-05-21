@@ -54,7 +54,11 @@ def authenticate(username, password):
       "edge",
       "def",
     ],
-    antiPatterns: ["fake import", "syntax error", "undefined"],
+    antiPatterns: [
+  "looks hallucinated",
+  "fake dependency",
+  "broken logic",
+],
   },
   {
     problemId: "l3-3",
@@ -77,7 +81,11 @@ def login(user, password):
       "unsafe",
       "plaintext",
     ],
-    antiPatterns: ["fake import", "undefined function"],
+    antiPatterns: [
+  "hallucinated api",
+  "fake dependency",
+  "undefined function call",
+],
   },
   {
     problemId: "l3-4",
@@ -127,7 +135,11 @@ def fast_fact(x):
       "standard",
       "no fake",
     ],
-    antiPatterns: ["hallucination", "fake import"],
+    antiPatterns: [
+  "broken logic",
+  "fake dependency",
+  "undefined function",
+],
   },
   {
     problemId: "l3-6",
@@ -170,6 +182,10 @@ def load_profile(user_id):
       "hallucin",
       "fabricated",
     ],
-    antiPatterns: ["standard library", "looks fine"],
+    antiPatterns: [
+  "valid package",
+  "safe dependency",
+  "official library",
+],
   },
 ];
