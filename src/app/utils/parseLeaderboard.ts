@@ -32,24 +32,21 @@ function effectiveness(row: Record<string, unknown>): number {
   return num(row.effectivenessScore ?? row.effectiveness);
 }
 
-function testPerformance(row: Record<string, unknown>): number {
-  const stored = num(row.testPassRate, NaN);
-  if (Number.isFinite(stored)) return stored;
-  const total = num(row.totalTestCases, 0);
-  if (total <= 0) return 0;
-  return (num(row.testCasesPassed, 0) / total) * 100;
-}
-
 function classifyRow(row: Record<string, unknown>): 'l1' | 'l2' | 'l3' {
   if (row.level === 1) return 'l1';
   if (row.level === 3) return 'l3';
   return 'l2';
 }
 
-function problemKey(row: Record<string, unknown>): string {
+function problemKey(row: Record<string, unknown>): string | null {
   const pid = row.problemId;
-  if (pid == null || pid === '') return '__unknown_problem__';
-  return String(pid);
+  if (pid == null || pid === '') return null;
+  const s = String(pid).trim();
+  return s || null;
+}
+
+function isRankableUserId(userId: string): boolean {
+  return !!userId && userId !== 'guest-user';
 }
 
 /** Fallback display when User collection username is unavailable (never drop the row). */
@@ -98,6 +95,7 @@ export function aggregateRawAttempts(
 
   for (const row of rows) {
     const userId = normalizeUserId(row.userId);
+    if (!isRankableUserId(userId)) continue;
     if (!byUser.has(userId)) {
       byUser.set(userId, { userId, l1: [], l2: [], l3: [] });
     }
@@ -111,21 +109,31 @@ export function aggregateRawAttempts(
   const l2Groups = new Map<string, Record<string, unknown>[]>();
   for (const row of rows) {
     if (classifyRow(row) !== 'l2') continue;
-    const key = `${normalizeUserId(row.userId)}::${problemKey(row)}`;
+    const userId = normalizeUserId(row.userId);
+    if (!isRankableUserId(userId)) continue;
+    const pid = problemKey(row);
+    if (pid == null) continue;
+    const key = `${userId}::${pid}`;
     if (!l2Groups.has(key)) l2Groups.set(key, []);
     l2Groups.get(key)!.push(row);
   }
 
-  const entries: LeaderboardEntry[] = [];
+  type SortableEntry = LeaderboardEntry & {
+    _overallScoreRaw: number;
+    _avgReliabilityRaw: number;
+    totalProblemsSolved: number;
+    levelsCompleted: number;
+    totalAttempts: number;
+  };
+
+  const entries: SortableEntry[] = [];
 
   for (const { userId, l1, l2, l3 } of byUser.values()) {
-    const l1Scores = l1.map(
-      (row) =>
-        (effectiveness(row) + reliability(row) + testPerformance(row)) / 3
-    );
+    const l1Scores = l1.map((row) => effectiveness(row));
     const avgLevel1Score = mean(l1Scores);
 
     const l2ProblemScores: number[] = [];
+    const l2Reliabilities: number[] = [];
     for (const [key, problemRows] of l2Groups) {
       if (!key.startsWith(`${userId}::`)) continue;
       const sorted = [...problemRows].sort(
@@ -138,7 +146,8 @@ export function aggregateRawAttempts(
       const rel = reliability(last);
       const eff = effectiveness(last);
       const efficiencyIndex = attempts > 0 ? rel / attempts : 0;
-      l2ProblemScores.push((eff + rel + efficiencyIndex) / 3);
+      l2ProblemScores.push(eff * 0.4 + rel * 0.4 + efficiencyIndex * 0.2);
+      l2Reliabilities.push(rel);
     }
     const avgLevel2Score = mean(l2ProblemScores);
 
@@ -147,38 +156,81 @@ export function aggregateRawAttempts(
       const reasoning = num(row.ethicalScore);
       const pid = String(row.problemId ?? '');
       if (pid.startsWith('ethical-')) {
-        return (composite + composite + reasoning) / 3;
+        return composite * 0.7 + reasoning * 0.3;
       }
-      return (composite + reliability(row) + reasoning) / 3;
+      return composite * 0.65 + reasoning * 0.35;
     });
     const avgLevel3Score = mean(l3Scores);
 
     let overallScore = 0;
     let weightSum = 0;
+    let levelsCompleted = 0;
     if (avgLevel1Score != null) {
       overallScore += WEIGHT_L1 * avgLevel1Score;
       weightSum += WEIGHT_L1;
+      levelsCompleted += 1;
     }
     if (avgLevel2Score != null) {
       overallScore += WEIGHT_L2 * avgLevel2Score;
       weightSum += WEIGHT_L2;
+      levelsCompleted += 1;
     }
     if (avgLevel3Score != null) {
       overallScore += WEIGHT_L3 * avgLevel3Score;
       weightSum += WEIGHT_L3;
+      levelsCompleted += 1;
     }
     overallScore = weightSum > 0 ? overallScore / weightSum : 0;
+
+    const uniqueProblems = new Set<string>();
+    for (const row of [...l1, ...l2, ...l3]) {
+      const pk = problemKey(row);
+      if (pk != null) uniqueProblems.add(pk);
+    }
+    const totalProblemsSolved = uniqueProblems.size;
+    if (totalProblemsSolved < 1) continue;
+
+    const avgReliabilityRaw = mean([
+      ...l1.map((r) => reliability(r)),
+      ...l2Reliabilities,
+      ...l3.map((r) => reliability(r)),
+    ]) ?? 0;
 
     entries.push({
       rank: 0,
       userId,
       username: fallbackDisplayName(userId),
-      score: round(overallScore),
+      score: 0,
+      _overallScoreRaw: overallScore,
+      _avgReliabilityRaw: avgReliabilityRaw,
+      totalProblemsSolved,
+      levelsCompleted,
+      totalAttempts: l1.length + l2.length + l3.length,
     });
   }
 
-  entries.sort((a, b) => b.score - a.score);
-  return entries.map((entry, index) => ({ ...entry, rank: index + 1 }));
+  entries.sort((a, b) => {
+    if (b._overallScoreRaw !== a._overallScoreRaw) {
+      return b._overallScoreRaw - a._overallScoreRaw;
+    }
+    if (b._avgReliabilityRaw !== a._avgReliabilityRaw) {
+      return b._avgReliabilityRaw - a._avgReliabilityRaw;
+    }
+    if (b.totalProblemsSolved !== a.totalProblemsSolved) {
+      return b.totalProblemsSolved - a.totalProblemsSolved;
+    }
+    if (b.levelsCompleted !== a.levelsCompleted) {
+      return b.levelsCompleted - a.levelsCompleted;
+    }
+    return a.totalAttempts - b.totalAttempts;
+  });
+
+  return entries.map((entry, index) => ({
+    rank: index + 1,
+    userId: entry.userId,
+    username: entry.username,
+    score: round(entry._overallScoreRaw),
+  }));
 }
 
 export function parseLeaderboardPayload(data: unknown): LeaderboardEntry[] {

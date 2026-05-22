@@ -33,7 +33,9 @@ userSchema.index(
   { unique: true, partialFilterExpression: { level: 1 } }
 );
 
-// ✅ IMPORTANT: default export
-const UserData = mongoose.model("UserData", userSchema);
+userSchema.index({ userId: 1, level: 1 });
+
+const UserData =
+  mongoose.models.UserData || mongoose.model("UserData", userSchema);
 
 export default UserData;

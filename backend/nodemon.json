@@ -5,7 +5,9 @@
     "controllers",
     "services",
     "middleware",
-    "models"
+    "models",
+    "../shared"
   ],
-  "ext": "js,json"
+  "ext": "js,json",
+  "delay": "300"
 }
