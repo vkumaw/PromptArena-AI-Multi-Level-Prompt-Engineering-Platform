@@ -44,25 +44,7 @@ export async function getLeaderboard(req, res) {
     const level3Count = await UserData.countDocuments({ level: 3 });
     const level2Count = totalAttempts - level1Count - level3Count;
 
-    console.log("[leaderboard] GET /api/leaderboard — v2 aggregated handler");
-    console.log("[leaderboard] collection counts:", {
-      db: mongoose.connection.name,
-      totalAttempts,
-      level1Count,
-      level2Count,
-      level3Count,
-    });
-
     const entries = await buildLeaderboard();
-    console.log("[leaderboard] buildLeaderboard result count:", entries.length);
-    if (entries[0]) {
-      console.log("[leaderboard] sample entry:", {
-        rank: entries[0].rank,
-        username: entries[0].username,
-        score: entries[0].score,
-        userId: entries[0].userId,
-      });
-    }
 
     const payload = entries.filter(isAggregatedEntry).map(ensureAggregatedShape);
 
@@ -86,7 +68,6 @@ export async function getLeaderboard(req, res) {
       );
     }
 
-    console.log("[leaderboard] final response length:", payload.length);
     res.json(payload);
   } catch (err) {
     console.error("Leaderboard error:", err);
