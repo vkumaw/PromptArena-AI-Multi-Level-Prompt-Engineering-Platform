@@ -79,7 +79,7 @@ export function AnalyticsPage() {
         <div className="mb-8">
           
 
-          <h1 className="text-3xl font-bold text-white mb-2">
+          <h1 className="text-3xl font-bold text-foreground mb-2">
   Performance Analytics
 </h1>
 
@@ -206,22 +206,22 @@ export function AnalyticsPage() {
 
                 <XAxis
                   dataKey="date"
-                  stroke="#cbd5f5"
+                  stroke="#8b67c1"
                   fontSize={12}
                 />
 
                 <YAxis
-                  stroke="#cbd5f5"
+                  stroke="#8b67c1"
                   fontSize={12}
                   domain={[0, 100]}
                 />
 
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "#111",
-                    border: "1px solid #333",
+                    backgroundColor: "#fff9ff",
+                    border: "1px solid rgba(138, 104, 182, 0.18)",
                     borderRadius: "8px",
-                    color: "#fff",
+                    color: "#2f2a3f",
                   }}
                 />
 
@@ -253,30 +253,30 @@ export function AnalyticsPage() {
                 <XAxis
                   type="number"
                   domain={[0, 100]}
-                  stroke="#ffffff"
-                  tick={{ fill: "#ffffff", fontSize: 12 }}
+                  stroke="#8b67c1"
+                  tick={{ fill: "#2f2a3f", fontSize: 12 }}
                 />
 
                 <YAxis
                   dataKey="category"
                   type="category"
                   width={120}
-                  tick={{ fill: "#ffffff", fontSize: 14 }}
+                  tick={{ fill: "#2f2a3f", fontSize: 14 }}
                 />
 
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "#111",
-                    border: "1px solid #333",
+                    backgroundColor: "#fff9ff",
+                    border: "1px solid rgba(138, 104, 182, 0.18)",
                     borderRadius: "8px",
-                    color: "#ffffff",
+                    color: "#2f2a3f",
                   }}
                   labelStyle={{
-                    color: "#ffffff",
+                    color: "#2f2a3f",
                     fontWeight: "bold",
                   }}
                   itemStyle={{
-                    color: "#ffffff",
+                    color: "#2f2a3f",
                   }}
                 />
 
@@ -302,21 +302,21 @@ export function AnalyticsPage() {
 
               <PolarAngleAxis
                 dataKey="category"
-                tick={{ fill: "#ffffff", fontSize: 14 }}
+                tick={{ fill: "#2f2a3f", fontSize: 14 }}
               />
 
               <PolarRadiusAxis
                 angle={30}
                 domain={[0, 100]}
-                tick={{ fill: "#ffffff" }}
+                tick={{ fill: "#2f2a3f" }}
               />
 
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "#111",
-                  border: "1px solid #333",
+                  backgroundColor: "#fff9ff",
+                  border: "1px solid rgba(138, 104, 182, 0.18)",
                   borderRadius: "8px",
-                  color: "#fff",
+                  color: "#2f2a3f",
                 }}
               />
 
@@ -338,7 +338,7 @@ export function AnalyticsPage() {
   <div className="space-y-4 text-sm text-muted-foreground leading-7">
 
     <div>
-      <span className="font-semibold text-white">
+      <span className="font-semibold text-foreground">
         Prompt Quality:
       </span>{" "}
       Calculated using prompt structure score and prompt score
@@ -346,7 +346,7 @@ export function AnalyticsPage() {
     </div>
 
     <div>
-      <span className="font-semibold text-white">
+      <span className="font-semibold text-foreground">
         Reliability Score:
       </span>{" "}
       Based on test case execution results, generated code
@@ -354,7 +354,7 @@ export function AnalyticsPage() {
     </div>
 
     <div>
-      <span className="font-semibold text-white">
+      <span className="font-semibold text-foreground">
         Ethics Score:
       </span>{" "}
       Generated during Level 3 ethical evaluation using
@@ -362,7 +362,7 @@ export function AnalyticsPage() {
     </div>
 
     <div>
-      <span className="font-semibold text-white">
+      <span className="font-semibold text-foreground">
         Score Over Time:
       </span>{" "}
       Displays how user performance changes across prompt
@@ -370,7 +370,7 @@ export function AnalyticsPage() {
     </div>
 
     <div>
-      <span className="font-semibold text-white">
+      <span className="font-semibold text-foreground">
         Performance Overview:
       </span>{" "}
       Radar visualization comparing Prompt Quality,

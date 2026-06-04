@@ -87,7 +87,7 @@ export function DashboardPage() {
       <div className="max-w-7xl mx-auto px-6 py-12">
         {/* Welcome Section */}
         <div className="mb-12">
-          <h1 className="text-4xl font-bold text-white mb-3">
+          <h1 className="text-4xl font-bold text-foreground mb-3">
             Welcome back, {currentUser?.username}!
           </h1>
           <p className="text-muted-foreground text-lg">
@@ -159,7 +159,7 @@ export function DashboardPage() {
               <Trophy className="size-5 text-white" />
             </div>
             <div>
-              <h2 className="text-2xl font-semibold text-white">Leaderboard</h2>
+              <h2 className="text-2xl font-semibold text-foreground">Leaderboard</h2>
               <p className="text-muted-foreground text-sm">
                 Top prompt engineers this month
               </p>
