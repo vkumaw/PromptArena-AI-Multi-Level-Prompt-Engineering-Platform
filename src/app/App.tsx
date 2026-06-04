@@ -12,7 +12,7 @@ import { RegisterPage } from './pages/RegisterPage';
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="dark min-h-screen">
+      <div className="min-h-screen">
         <Routes>
           <Route path="/" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
