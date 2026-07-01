@@ -20,6 +20,7 @@ export function LoginPage() {
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     try {
+      console.log("Login URL:", apiPath("/auth/login"));
   const response = await fetch(apiPath('/auth/login'), {
     method: 'POST',
     headers: {
