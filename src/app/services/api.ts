@@ -51,17 +51,20 @@ function mockLevel3Key(userId: string, problemId: string) {
 
 /** Same URL rules as Level 1/2: apiPath when base is set, else Vite proxy `/api/*`. */
 function resolveHttpApiUrl(path: string): string {
-  const p = path.startsWith('/') ? path : `/${path}`;
+  const p = path.startsWith("/") ? path : `/${path}`;
 
-  const base = (import.meta.env.VITE_API_BASE_URL || '').trim();
+  const base = (import.meta.env.VITE_API_BASE_URL || "")
+    .trim()
+    .replace(/\/$/, "");
 
   if (base) {
-    return `${base}${p}`;
+    return `${base}/api${p}`;
   }
-
+  const url = base ? `${base}/api${p}` : `/api${p}`;
+console.log("Resolved API URL:", url);
+return url;
   return `/api${p}`;
 }
-
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const clamp = (value: number, min: number, max: number) =>
