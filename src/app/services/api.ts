@@ -60,9 +60,6 @@ function resolveHttpApiUrl(path: string): string {
   if (base) {
     return `${base}/api${p}`;
   }
-  const url = base ? `${base}/api${p}` : `/api${p}`;
-console.log("Resolved API URL:", url);
-return url;
   return `/api${p}`;
 }
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

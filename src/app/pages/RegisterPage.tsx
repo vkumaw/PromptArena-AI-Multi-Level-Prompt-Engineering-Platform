@@ -19,7 +19,6 @@ export function RegisterPage() {
     setIsLoading(true);
 
     try {
-      console.log("Register URL:", apiPath("/auth/register"));
   const response = await fetch(apiPath('/auth/register'), {
     method: 'POST',
     headers: {
